@@ -18,7 +18,7 @@ jobs:
       - uses: android-actions/setup-android@v3  
         with:
           packages: ''
-      - run: sdkmanager "ndk;29.0.14206865" "platforms;android-37" "build-tools;37.0.0"
+      - run: sdkmanager "ndk;29.0.14206865"
       - run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
