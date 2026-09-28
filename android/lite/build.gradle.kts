@@ -25,7 +25,7 @@ val cargoTargetDirectory: File = rustWorkspaceDir.resolve("target")
 
 val cargoBuildLite = tasks.register<Exec>("cargo-build-lite") {
     description = "Building core for armeabi-v7a"
-    workingDir = rustWorkspaceDir
+    workingDir = rustProjectDir
     commandLine(
         "cargo",
         "ndk",
