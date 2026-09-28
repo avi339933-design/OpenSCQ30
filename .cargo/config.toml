@@ -1,0 +1,4 @@
+[target.armv7-linux-androideabi]
+rustflags = [
+    "-C", "link-arg=-Wl,--undefined=dl_iterate_phdr",
+]
