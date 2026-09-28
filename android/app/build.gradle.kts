@@ -49,7 +49,7 @@ android {
 
     defaultConfig {
         applicationId = "com.oppzippy.openscq30"
-        minSdk = 26
+        minSdk = 19
         targetSdk = 37
         versionCode = 1028
         versionName = "2.12.0"
@@ -219,7 +219,7 @@ gradleToCargoProfiles.forEach { (gradleBuildProfile, cargoProfile) ->
                 "--target",
                 abi.rust,
                 "--platform",
-                "26",
+                "19",
                 "build",
                 "--profile",
                 if (cargoProfile == "debug") "dev" else cargoProfile,
