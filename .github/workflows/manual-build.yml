@@ -15,7 +15,9 @@ jobs:
         with:
           targets: armv7-linux-androideabi,aarch64-linux-android,i686-linux-android,x86_64-linux-android
       - run: cargo install cargo-ndk
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3  
+        with:
+          packages: ''
       - run: sdkmanager "ndk;29.0.14206865" "platforms;android-37" "build-tools;37.0.0"
       - run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug --stacktrace
