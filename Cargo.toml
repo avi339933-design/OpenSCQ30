@@ -126,3 +126,8 @@ accesskit_winit = { git = "https://github.com/Oppzippy/accesskit.git", branch = 
 
 [patch.'https://github.com/pop-os/softbuffer']
 softbuffer = { git = "https://github.com/Oppzippy/softbuffer.git" }
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
