@@ -1,4 +1,5 @@
 import com.oppzippy.openscq30.gradle.CopyNativeLibTask
+import com.oppzippy.openscq30.gradle.GenerateUniffiBindingsTask
 
 plugins {
     alias(libs.plugins.android.application)
@@ -17,6 +18,20 @@ android {
         versionCode = 1
         versionName = "0.1"
     }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation(libs.jna) {
+        artifact {
+            type = "aar"
+        }
+    }
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 }
 
 val rustProjectDir: File = layout.projectDirectory.asFile.parentFile
@@ -27,15 +42,10 @@ val cargoBuildLite = tasks.register<Exec>("cargo-build-lite") {
     description = "Building core for armeabi-v7a"
     workingDir = rustProjectDir
     commandLine(
-        "cargo",
-        "ndk",
-        "--target",
-        "armv7-linux-androideabi",
-        "--platform",
-        "19",
-        "build",
-        "--profile",
-        "dev",
+        "cargo", "ndk",
+        "--target", "armv7-linux-androideabi",
+        "--platform", "19",
+        "build", "--profile", "dev",
     )
 }
 
@@ -49,11 +59,25 @@ val copyNativeLibLite = tasks.register<CopyNativeLibTask>("rust-deploy-lite") {
     this.outputDirectory = layout.buildDirectory.get().asFile.resolve("generated/native/debug-armeabi-v7a/jniLibs")
 }
 
+val generateBindingsLite = tasks.register<GenerateUniffiBindingsTask>("generate-uniffi-bindings-lite") {
+    dependsOn(cargoBuildLite)
+    description = "Generate kotlin bindings using uniffi-bindgen"
+    this.rustAbi = "armv7-linux-androideabi"
+    this.cargoProfile = "debug"
+    this.rustWorkspaceDirectory = rustWorkspaceDir
+    this.rustProjectDirectory = rustProjectDir
+    this.outputDirectory = layout.buildDirectory.get().asFile.resolve("generated/source/uniffi/debug/java")
+}
+
 androidComponents {
     onVariants(selector().withBuildType("debug")) { variant ->
         variant.sources.jniLibs!!.addGeneratedSourceDirectory(
             copyNativeLibLite,
             CopyNativeLibTask::outputDirectory,
+        )
+        variant.sources.java!!.addGeneratedSourceDirectory(
+            generateBindingsLite,
+            GenerateUniffiBindingsTask::outputDirectory,
         )
     }
 }
