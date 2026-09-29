@@ -3,6 +3,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <application
+        android:name=".LiteApplication"
         android:label="OpenSCQ30 Lite"
         android:theme="@android:style/Theme.Holo">
         <activity
