@@ -3,6 +3,8 @@ import com.oppzippy.openscq30.gradle.GenerateUniffiBindingsTask
 
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.serialization)
+    id("kotlin-parcelize")
 }
 
 android {
@@ -31,6 +33,7 @@ dependencies {
             type = "aar"
         }
     }
+    implementation(libs.kotlinx.serialization.json)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 }
 
@@ -42,10 +45,15 @@ val cargoBuildLite = tasks.register<Exec>("cargo-build-lite") {
     description = "Building core for armeabi-v7a"
     workingDir = rustProjectDir
     commandLine(
-        "cargo", "ndk",
-        "--target", "armv7-linux-androideabi",
-        "--platform", "19",
-        "build", "--profile", "dev",
+        "cargo",
+        "ndk",
+        "--target",
+        "armv7-linux-androideabi",
+        "--platform",
+        "19",
+        "build",
+        "--profile",
+        "dev",
     )
 }
 
@@ -69,6 +77,10 @@ val generateBindingsLite = tasks.register<GenerateUniffiBindingsTask>("generate-
     this.outputDirectory = layout.buildDirectory.get().asFile.resolve("generated/source/uniffi/debug/java")
 }
 
+val wrapperDir: String = layout.projectDirectory
+    .dir("../app/src/main/java/com/oppzippy/openscq30/lib/wrapper")
+    .asFile.absolutePath
+
 androidComponents {
     onVariants(selector().withBuildType("debug")) { variant ->
         variant.sources.jniLibs!!.addGeneratedSourceDirectory(
@@ -79,5 +91,6 @@ androidComponents {
             generateBindingsLite,
             GenerateUniffiBindingsTask::outputDirectory,
         )
+        variant.sources.java!!.addStaticSourceDirectory(wrapperDir)
     }
 }
