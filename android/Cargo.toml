@@ -29,5 +29,6 @@ strum = { workspace = true }
 i18n-embed = { workspace = true, features = ["fluent-system"] }
 i18n-embed-fl = { workspace = true }
 
-[build-dependencies]cc = "1"
+[build-dependencies]
+cc = "1"
 uniffi = { workspace = true, features = ["build"] }
