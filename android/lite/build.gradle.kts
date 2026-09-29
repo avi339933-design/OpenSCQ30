@@ -19,6 +19,7 @@ android {
         targetSdk = 19
         versionCode = 1
         versionName = "0.1"
+        multiDexEnabled = true // NEW
     }
 
     compileOptions {
@@ -35,7 +36,8 @@ dependencies {
     }
     implementation(libs.kotlinx.serialization.json)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
-    implementation("androidx.annotation:annotation:1.9.1") // NEW
+    implementation("androidx.annotation:annotation:1.9.1")
+    implementation("androidx.multidex:multidex:2.0.1") // NEW
 }
 
 val rustProjectDir: File = layout.projectDirectory.asFile.parentFile
