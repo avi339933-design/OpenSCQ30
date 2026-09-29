@@ -35,6 +35,7 @@ dependencies {
     }
     implementation(libs.kotlinx.serialization.json)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("androidx.annotation:annotation:1.9.1") // NEW
 }
 
 val rustProjectDir: File = layout.projectDirectory.asFile.parentFile
