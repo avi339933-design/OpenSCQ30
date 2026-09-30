@@ -288,7 +288,7 @@ mod tests {
         use crate::devices::soundcore::{
             a3954,
             common::{
-                packet::{inbound::inbound_packet::FromPacketBody, parsing::take_bool},
+                packet::{inbound::FromPacketBody, parsing::take_bool},
                 structures::{
                     AmbientSoundModeCycle, AutoPowerOff, CaseBatteryLevel,
                     CommonEqualizerConfiguration, CustomHearId, DualBattery, DualFirmwareVersion,
