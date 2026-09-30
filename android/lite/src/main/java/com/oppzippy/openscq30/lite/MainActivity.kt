@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.widget.ScrollView
 import android.widget.TextView
 import com.oppzippy.openscq30.lib.bindings.initNativeLogging
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,9 +33,8 @@ class MainActivity : Activity() {
                 .append(": ")
                 .append(current.message)
                 .append("\n")
-            val last = current.cause == null
-            if (last) {
-                current.stackTrace.take(4).forEach { out.append("   at ").append(it.toString()).append("\n") }
+            if (current.cause == null) {
+                current.stackTrace.take(3).forEach { out.append("   at ").append(it.toString()).append("\n") }
             }
             current = current.cause
             depth += 1
@@ -54,12 +54,23 @@ class MainActivity : Activity() {
         line("Android SDK: ${Build.VERSION.SDK_INT}")
         line("ABI: ${Build.CPU_ABI}")
 
+        val libDir = applicationInfo.nativeLibraryDir
+        val files = File(libDir).list()?.joinToString(", ") ?: "none"
+        line("nativeLibDir files: $files")
+
         try {
             System.loadLibrary("openscq30_android")
             line("OK: openscq30_android loaded")
         } catch (t: Throwable) {
             line("FAIL loadLibrary:\n" + describe(t))
             return
+        }
+
+        try {
+            System.loadLibrary("jnidispatch")
+            line("OK: jnidispatch loaded")
+        } catch (t: Throwable) {
+            line("FAIL jnidispatch:\n" + describe(t))
         }
 
         try {
