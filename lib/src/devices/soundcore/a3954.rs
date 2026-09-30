@@ -207,12 +207,88 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn parses_known_packet() {
-        #[test]
+        let device = TestSoundcoreDevice::new(
+            super::device_registry,
+            DeviceModel::SoundcoreA3954,
+            HashMap::from([(
+                packet::Command([1, 1]),
+                packet::Inbound::new(
+                    packet::Command([1, 1]),
+                    vec![
+                        0, 1, 99, 100, 0, 0, 48, 51, 46, 50, 57, 48, 51, 46, 50, 57, 51, 57, 53,
+                        52, 68, 69, 55, 55, 53, 49, 56, 65, 57, 68, 70, 52, 48, 50, 46, 53, 56, 9,
+                        0xF4, 0x9D, 0x8A, 0x53, 0x2B, 0xBA, 254, 254, 120, 120, 120, 120, 120, 120,
+                        120, 120, 120, 120, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 1,
+                        145, 147, 139, 141, 122, 111, 105, 100, 60, 60, 145, 147, 139, 141, 122,
+                        111, 105, 100, 60, 60, 0, 0, 0, 0, 1, 145, 147, 139, 130, 122, 133, 133,
+                        114, 60, 60, 145, 147, 139, 130, 122, 133, 133, 114, 60, 60, 0, 0, 10,
+                        0x66, 0x66, 0x32, 0x33, 0xFF, 0xFF, 0x44, 0x44, 0x33, 2, 6, 0, 0, 255, 1,
+                        255, 0, 0, 0, 0, 94, 1, 110, 1, 0, 0, 0, 1, 0, 1, 95, 0, 0, 1, 0, 0, 0, 0,
+                        110, 1, 0, 1, 0, 0, 255, 0, 0, 17, 17,
+                    ],
+                ),
+            )]),
+            SoundcoreDeviceConfig::default(),
+        )
+        .await;
+
+        device.assert_setting_values([
+            (SettingId::BatteryLevelLeft, "99/100".into()),
+            (SettingId::BatteryLevelRight, "100/100".into()),
+            (SettingId::CaseBatteryLevel, "10/10".into()),
+            (SettingId::IsChargingLeft, "No".into()),
+            (SettingId::IsChargingRight, "No".into()),
+            (SettingId::AmbientSoundMode, "Normal".into()),
+            (SettingId::AirplaneMode, "ManualUpdate".into()),
+            (SettingId::AirPressure, "0.94".into()),
+            (SettingId::WindNoiseSuppression, false.into()),
+            (SettingId::SpatialAudioMode, "Music".into()),
+            (SettingId::SpatialAudioMusicMode, "Fixed".into()),
+            (SettingId::LeftSinglePress, Some("PlayPause").into()),
+            (SettingId::LeftDoublePress, Some("PreviousSong").into()),
+            (
+                SettingId::LeftTriplePress,
+                Value::OptionalString(None).into(),
+            ),
+            (SettingId::LeftLongPress, Some("AmbientSoundMode").into()),
+            (SettingId::LeftSlideUp, Some("VolumeUp").into()),
+            (SettingId::LeftSlideDown, Some("VolumeDown").into()),
+            (SettingId::RightSinglePress, Some("PlayPause").into()),
+            (SettingId::RightDoublePress, Some("NextSong").into()),
+            (SettingId::RightTriplePress, Value::OptionalString(None)),
+            (SettingId::RightLongPress, Some("AmbientSoundMode").into()),
+            (SettingId::RightSlideUp, Some("VolumeUp").into()),
+            (SettingId::RightSlideDown, Some("VolumeDown").into()),
+            (SettingId::EasyChat, false.into()),
+            (SettingId::EasyChatWaitTime, "5s".into()),
+            (SettingId::WearingDetection, false.into()),
+            (SettingId::SoundLeakCompensation, false.into()),
+            (SettingId::LimitHighVolume, true.into()),
+            (SettingId::LimitHighVolumeDbLimit, 95.into()),
+            (SettingId::LimitHighVolumeRefreshRate, "RealTime".into()),
+            (SettingId::LowBatteryPrompt, false.into()),
+            (SettingId::Ldac, false.into()),
+            (SettingId::DualConnections, false.into()),
+            (SettingId::SpatialAudio, false.into()),
+            (SettingId::Atmospheric, false.into()),
+            (SettingId::FindDevice, false.into()),
+            (SettingId::RemoteCamera, false.into()),
+            (SettingId::CaseLanguage, "English".into()),
+            (SettingId::AutoPowerOff, "10m".into()),
+            (SettingId::FirmwareVersionLeft, "03.29".into()),
+            (SettingId::FirmwareVersionRight, "03.29".into()),
+            (SettingId::CaseFirmwareVersion, "02.58".into()),
+            (SettingId::SerialNumber, "3954DE77518A9DF4".into()),
+            (SettingId::CaseSerialNumber, "3954F49D8A532BBA".into()),
+        ]);
+    }
+
+    #[test]
     fn debug_firmware_03_23_packet_lengths() {
         use crate::devices::soundcore::{
             a3954,
             common::{
-                packet::parsing::take_bool,
+                packet::{inbound::inbound_packet::FromPacketBody, parsing::take_bool},
                 structures::{
                     AmbientSoundModeCycle, AutoPowerOff, CaseBatteryLevel,
                     CommonEqualizerConfiguration, CustomHearId, DualBattery, DualFirmwareVersion,
@@ -301,81 +377,6 @@ mod tests {
         let input = step!("ButtonStatusCollection<4>", parser4(input));
 
         println!("FINAL remaining={}", input.len());
-    }
-        let device = TestSoundcoreDevice::new(
-            super::device_registry,
-            DeviceModel::SoundcoreA3954,
-            HashMap::from([(
-                packet::Command([1, 1]),
-                packet::Inbound::new(
-                    packet::Command([1, 1]),
-                    vec![
-                        0, 1, 99, 100, 0, 0, 48, 51, 46, 50, 57, 48, 51, 46, 50, 57, 51, 57, 53,
-                        52, 68, 69, 55, 55, 53, 49, 56, 65, 57, 68, 70, 52, 48, 50, 46, 53, 56, 9,
-                        0xF4, 0x9D, 0x8A, 0x53, 0x2B, 0xBA, 254, 254, 120, 120, 120, 120, 120, 120,
-                        120, 120, 120, 120, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 1,
-                        145, 147, 139, 141, 122, 111, 105, 100, 60, 60, 145, 147, 139, 141, 122,
-                        111, 105, 100, 60, 60, 0, 0, 0, 0, 1, 145, 147, 139, 130, 122, 133, 133,
-                        114, 60, 60, 145, 147, 139, 130, 122, 133, 133, 114, 60, 60, 0, 0, 10,
-                        0x66, 0x66, 0x32, 0x33, 0xFF, 0xFF, 0x44, 0x44, 0x33, 2, 6, 0, 0, 255, 1,
-                        255, 0, 0, 0, 0, 94, 1, 110, 1, 0, 0, 0, 1, 0, 1, 95, 0, 0, 1, 0, 0, 0, 0,
-                        110, 1, 0, 1, 0, 0, 255, 0, 0, 17, 17,
-                    ],
-                ),
-            )]),
-            SoundcoreDeviceConfig::default(),
-        )
-        .await;
-
-        device.assert_setting_values([
-            (SettingId::BatteryLevelLeft, "99/100".into()),
-            (SettingId::BatteryLevelRight, "100/100".into()),
-            (SettingId::CaseBatteryLevel, "10/10".into()),
-            (SettingId::IsChargingLeft, "No".into()),
-            (SettingId::IsChargingRight, "No".into()),
-            (SettingId::AmbientSoundMode, "Normal".into()),
-            (SettingId::AirplaneMode, "ManualUpdate".into()),
-            (SettingId::AirPressure, "0.94".into()),
-            (SettingId::WindNoiseSuppression, false.into()),
-            (SettingId::SpatialAudioMode, "Music".into()),
-            (SettingId::SpatialAudioMusicMode, "Fixed".into()),
-            (SettingId::LeftSinglePress, Some("PlayPause").into()),
-            (SettingId::LeftDoublePress, Some("PreviousSong").into()),
-            (
-                SettingId::LeftTriplePress,
-                Value::OptionalString(None).into(),
-            ),
-            (SettingId::LeftLongPress, Some("AmbientSoundMode").into()),
-            (SettingId::LeftSlideUp, Some("VolumeUp").into()),
-            (SettingId::LeftSlideDown, Some("VolumeDown").into()),
-            (SettingId::RightSinglePress, Some("PlayPause").into()),
-            (SettingId::RightDoublePress, Some("NextSong").into()),
-            (SettingId::RightTriplePress, Value::OptionalString(None)),
-            (SettingId::RightLongPress, Some("AmbientSoundMode").into()),
-            (SettingId::RightSlideUp, Some("VolumeUp").into()),
-            (SettingId::RightSlideDown, Some("VolumeDown").into()),
-            (SettingId::EasyChat, false.into()),
-            (SettingId::EasyChatWaitTime, "5s".into()),
-            (SettingId::WearingDetection, false.into()),
-            (SettingId::SoundLeakCompensation, false.into()),
-            (SettingId::LimitHighVolume, true.into()),
-            (SettingId::LimitHighVolumeDbLimit, 95.into()),
-            (SettingId::LimitHighVolumeRefreshRate, "RealTime".into()),
-            (SettingId::LowBatteryPrompt, false.into()),
-            (SettingId::Ldac, false.into()),
-            (SettingId::DualConnections, false.into()),
-            (SettingId::SpatialAudio, false.into()),
-            (SettingId::Atmospheric, false.into()),
-            (SettingId::FindDevice, false.into()),
-            (SettingId::RemoteCamera, false.into()),
-            (SettingId::CaseLanguage, "English".into()),
-            (SettingId::AutoPowerOff, "10m".into()),
-            (SettingId::FirmwareVersionLeft, "03.29".into()),
-            (SettingId::FirmwareVersionRight, "03.29".into()),
-            (SettingId::CaseFirmwareVersion, "02.58".into()),
-            (SettingId::SerialNumber, "3954DE77518A9DF4".into()),
-            (SettingId::CaseSerialNumber, "3954F49D8A532BBA".into()),
-        ]);
     }
 
     #[tokio::test(start_paused = true)]
