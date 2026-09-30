@@ -207,6 +207,101 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn parses_known_packet() {
+        #[test]
+    fn debug_firmware_03_23_packet_lengths() {
+        use crate::devices::soundcore::{
+            a3954,
+            common::{
+                packet::parsing::take_bool,
+                structures::{
+                    AmbientSoundModeCycle, AutoPowerOff, CaseBatteryLevel,
+                    CommonEqualizerConfiguration, CustomHearId, DualBattery, DualFirmwareVersion,
+                    Ldac, LimitHighVolume, LowBatteryPrompt, SerialNumber, SoundLeakCompensation,
+                    TwsStatus, WearingDetection,
+                    button_configuration::ButtonStatusCollection,
+                },
+            },
+        };
+        use nom_language::error::VerboseError;
+
+        // Serial numbers zeroed out for this shared code.
+        let input: &[u8] = &[
+            1, 1, 97, 96, 0, 0, 48, 51, 46, 50, 51, 48, 51, 46, 50, 51, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 48, 49, 46, 53, 54, 3, 0, 0, 0, 0, 0, 0, 0, 0, 120, 120, 120, 120,
+            120, 120, 120, 120, 120, 120, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0,
+            254, 254, 254, 254, 254, 254, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 102, 102, 50, 51, 255, 255, 68, 68, 51, 0, 11, 0, 0, 1,
+            255, 0, 0, 0, 96, 1, 50, 1, 1, 0, 1, 1, 2, 0, 90, 0, 0, 0, 0, 0, 0, 50, 0, 0, 1, 0, 0,
+            255,
+        ];
+
+        macro_rules! step {
+            ($name:literal, $result:expr) => {
+                match $result {
+                    Ok((remaining, _)) => {
+                        println!("OK  {:<28} remaining={}", $name, remaining.len());
+                        remaining
+                    }
+                    Err(e) => {
+                        println!("FAIL {} : {:?}", $name, e);
+                        panic!("stopped at {}", $name);
+                    }
+                }
+            };
+        }
+
+        let input = step!("TwsStatus", TwsStatus::take::<VerboseError<_>>(input));
+        let input = step!("DualBattery", DualBattery::take::<VerboseError<_>>(input));
+        let input = step!("DualFirmwareVersion", DualFirmwareVersion::take::<VerboseError<_>>(input));
+        let input = step!("SerialNumber", SerialNumber::take::<VerboseError<_>>(input));
+        let input = step!("CaseFirmwareVersion", a3954::structures::CaseFirmwareVersion::take::<VerboseError<_>>(input));
+        let input = step!("CaseBatteryLevel", CaseBatteryLevel::take::<VerboseError<_>>(input));
+        let input = step!("CaseSerialNumber", a3954::structures::CaseSerialNumber::take::<VerboseError<_>>(input));
+        let input = step!("EqualizerConfiguration", CommonEqualizerConfiguration::<2, 10>::take::<VerboseError<_>>(input));
+        let (input, _u1) = nom::bytes::complete::take::<_, _, VerboseError<&[u8]>>(1usize)(input).unwrap();
+        println!("OK  unknown1                    remaining={}", input.len());
+        let input = step!("CustomHearId", CustomHearId::<2, 10>::take_with_music_genre_at_end::<VerboseError<_>>(input));
+        let (input, _u2) = nom::bytes::complete::take::<_, _, VerboseError<&[u8]>>(1usize)(input).unwrap();
+        println!("OK  unknown2                    remaining={}", input.len());
+
+        let btn = a3954::BUTTON_CONFIGURATION_SETTINGS.parse_settings();
+        let parser8 = ButtonStatusCollection::<8>::take::<VerboseError<&[u8]>, 8>(std::array::from_fn(|i| btn[i]));
+        let input = step!("ButtonStatusCollection<8>", parser8(input));
+
+        let input = step!("AmbientSoundModeCycle", AmbientSoundModeCycle::take::<VerboseError<_>>(input));
+        let input = step!("SoundModes", a3954::structures::SoundModes::take::<VerboseError<_>>(input));
+        let (input, _u3) = nom::bytes::complete::take::<_, _, VerboseError<&[u8]>>(3usize)(input).unwrap();
+        println!("OK  unknown3                    remaining={}", input.len());
+        let input = step!("CaseFeatures", a3954::structures::CaseFeatures::take::<VerboseError<_>>(input));
+        let input = step!("AirPressure", a3954::structures::AirPressure::take::<VerboseError<_>>(input));
+        let (input, _u4) = nom::bytes::complete::take::<_, _, VerboseError<&[u8]>>(3usize)(input).unwrap();
+        println!("OK  unknown4                    remaining={}", input.len());
+        let input = step!("LowBatteryPrompt", LowBatteryPrompt::take::<VerboseError<_>>(input));
+        let input = step!("Ldac", Ldac::take::<VerboseError<_>>(input));
+        let (input, _dc) = take_bool::<VerboseError<&[u8]>>(input).unwrap();
+        println!("OK  dual_connections_enabled    remaining={}", input.len());
+        let input = step!("AutoPowerOff", AutoPowerOff::take::<VerboseError<_>>(input));
+        let input = step!("LimitHighVolume", LimitHighVolume::take::<VerboseError<_>>(input));
+        let input = step!("SpatialAudio", a3954::structures::SpatialAudio::take::<VerboseError<_>>(input));
+        let (input, _ec) = take_bool::<VerboseError<&[u8]>>(input).unwrap();
+        println!("OK  easy_chat_enabled           remaining={}", input.len());
+        let (input, _u5) = nom::bytes::complete::take::<_, _, VerboseError<&[u8]>>(1usize)(input).unwrap();
+        println!("OK  unknown5                    remaining={}", input.len());
+        let input = step!("SoundLeakCompensation", SoundLeakCompensation::take::<VerboseError<_>>(input));
+        let (input, _u6) = nom::bytes::complete::take::<_, _, VerboseError<&[u8]>>(3usize)(input).unwrap();
+        println!("OK  unknown6                    remaining={}", input.len());
+        let input = step!("CaseLanguage", a3954::structures::CaseLanguage::take::<VerboseError<_>>(input));
+        let input = step!("EasyChatWaitTime", a3954::structures::EasyChatWaitTime::take::<VerboseError<_>>(input));
+        let input = step!("WearingDetection", WearingDetection::take::<VerboseError<_>>(input));
+        let (input, _u7) = nom::bytes::complete::take::<_, _, VerboseError<&[u8]>>(1usize)(input).unwrap();
+        println!("OK  unknown7                    remaining={}", input.len());
+
+        let btn2 = a3954::BUTTON_CONFIGURATION_SETTINGS.parse_settings();
+        let parser4 = ButtonStatusCollection::<4>::take::<VerboseError<&[u8]>, 4>(std::array::from_fn(|i| btn2[8 + i]));
+        let input = step!("ButtonStatusCollection<4>", parser4(input));
+
+        println!("FINAL remaining={}", input.len());
+    }
         let device = TestSoundcoreDevice::new(
             super::device_registry,
             DeviceModel::SoundcoreA3954,
