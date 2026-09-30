@@ -87,92 +87,46 @@ impl FromPacketBody for A3954StateUpdatePacket {
         input: &'a [u8],
     ) -> IResult<&'a [u8], Self, E> {
         let button_parse_settings = a3954::BUTTON_CONFIGURATION_SETTINGS.parse_settings();
-        context(
+
+        // Part 1: fields that every firmware sends (earbuds firmware 03.23 ends right after
+        // auto power off).
+        let head_result: IResult<&'a [u8], _, E> = context(
             "a3954 state update packet",
-            map(
+            (
                 (
-                    (
-                        TwsStatus::take,
-                        DualBattery::take,
-                        DualFirmwareVersion::take,
-                        SerialNumber::take,
-                        a3954::structures::CaseFirmwareVersion::take,
-                        CaseBatteryLevel::take,
-                        a3954::structures::CaseSerialNumber::take,
-                        CommonEqualizerConfiguration::take,
-                        take(1usize), // unknown
-                        CustomHearId::take_with_music_genre_at_end,
-                        take(1usize), // unknown
-                        // The non-slide buttons and slide buttons are not together, so we have to split up parsing
-                        ButtonStatusCollection::<8>::take(array::from_fn::<_, 8, _>(|i| {
-                            button_parse_settings[i]
-                        })),
-                        AmbientSoundModeCycle::take,
-                        a3954::structures::SoundModes::take,
-                        take(3usize), // unknown
-                        a3954::structures::CaseFeatures::take,
-                        a3954::structures::AirPressure::take,
-                        take(3usize), // unknown
-                        LowBatteryPrompt::take,
-                        Ldac::take,
-                        take_bool, // dual connections enabled
-                    ),
-                    (
-                        AutoPowerOff::take,
-                        LimitHighVolume::take,
-                        a3954::structures::SpatialAudio::take,
-                        take_bool,    // Easy chat enabled
-                        take(1usize), // unknown
-                        SoundLeakCompensation::take,
-                        take(3usize), // unknown
-                        a3954::structures::CaseLanguage::take,
-                        a3954::structures::EasyChatWaitTime::take,
-                        WearingDetection::take,
-                        take(1usize), // unknown
-                        ButtonStatusCollection::<4>::take(array::from_fn::<_, 4, _>(|i| {
-                            button_parse_settings[8 + i]
-                        })),
-                    ),
+                    TwsStatus::take,
+                    DualBattery::take,
+                    DualFirmwareVersion::take,
+                    SerialNumber::take,
+                    a3954::structures::CaseFirmwareVersion::take,
+                    CaseBatteryLevel::take,
+                    a3954::structures::CaseSerialNumber::take,
+                    CommonEqualizerConfiguration::take,
+                    take(1usize), // unknown
+                    CustomHearId::take_with_music_genre_at_end,
+                    take(1usize), // unknown
+                    // The non-slide buttons and slide buttons are not together, so we have to split up parsing
+                    ButtonStatusCollection::<8>::take(array::from_fn::<_, 8, _>(|i| {
+                        button_parse_settings[i]
+                    })),
+                    AmbientSoundModeCycle::take,
+                    a3954::structures::SoundModes::take,
+                    take(3usize), // unknown
+                    a3954::structures::CaseFeatures::take,
+                    a3954::structures::AirPressure::take,
+                    take(3usize), // unknown
+                    LowBatteryPrompt::take,
+                    Ldac::take,
+                    take_bool, // dual connections enabled
                 ),
-                |(
-                    (
-                        tws_status,
-                        battery,
-                        firmware_version,
-                        serial_number,
-                        case_firmware_version,
-                        case_battery_level,
-                        case_serial_number,
-                        equalizer_configuration,
-                        _unknown1,
-                        hear_id,
-                        _unknown2,
-                        main_buttons,
-                        ambient_sound_mode_cycle,
-                        sound_modes,
-                        _unknown3,
-                        case_features,
-                        air_pressure,
-                        _unknown4,
-                        low_battery_prompt,
-                        ldac,
-                        dual_connections_enabled,
-                    ),
-                    (
-                        auto_power_off,
-                        limit_high_volume,
-                        spatial_audio,
-                        is_easy_chat_enabled,
-                        _unknown5,
-                        sound_leak_compensation,
-                        _unknown6,
-                        case_language,
-                        easy_chat_wait_time,
-                        wearing_detection,
-                        _unknown7,
-                        slide_buttons,
-                    ),
-                )| Self {
+                AutoPowerOff::take,
+            ),
+        )
+        .parse_complete(input);
+        let (
+            input,
+            (
+                (
                     tws_status,
                     battery,
                     firmware_version,
@@ -181,36 +135,143 @@ impl FromPacketBody for A3954StateUpdatePacket {
                     case_battery_level,
                     case_serial_number,
                     equalizer_configuration,
+                    _unknown1,
                     hear_id,
-                    button_configuration: ButtonStatusCollection(
-                        main_buttons
-                            .0
-                            .into_iter()
-                            .chain(slide_buttons.0)
-                            .collect_array::<12>()
-                            .expect("we took size 8 and 4, so if that succeeded, we have 12"),
-                    ),
+                    _unknown2,
+                    main_buttons,
                     ambient_sound_mode_cycle,
                     sound_modes,
+                    _unknown3,
                     case_features,
                     air_pressure,
+                    _unknown4,
                     low_battery_prompt,
                     ldac,
                     dual_connections_enabled,
-                    auto_power_off,
+                ),
+                auto_power_off,
+            ),
+        ) = head_result?;
+
+        // Part 2: fields that older firmware (03.23) does not send at all. If the packet has
+        // ended, use default values for all of them.
+        let tail = if input.is_empty() {
+            None
+        } else {
+            let tail_result: IResult<&'a [u8], _, E> = context(
+                "a3954 state update packet tail",
+                (
+                    LimitHighVolume::take,
+                    a3954::structures::SpatialAudio::take,
+                    take_bool,    // Easy chat enabled
+                    take(1usize), // unknown
+                    SoundLeakCompensation::take,
+                    take(3usize), // unknown
+                    a3954::structures::CaseLanguage::take,
+                    a3954::structures::EasyChatWaitTime::take,
+                    WearingDetection::take,
+                    take(1usize), // unknown
+                    ButtonStatusCollection::<4>::take(array::from_fn::<_, 4, _>(|i| {
+                        button_parse_settings[8 + i]
+                    })),
+                ),
+            )
+            .parse_complete(input);
+            let (input, tail_fields) = tail_result?;
+            Some((input, tail_fields))
+        };
+
+        let (
+            input,
+            limit_high_volume,
+            spatial_audio,
+            easy_chat,
+            sound_leak_compensation,
+            case_language,
+            wearing_detection,
+            slide_buttons,
+        ) = match tail {
+            Some((
+                input,
+                (
                     limit_high_volume,
                     spatial_audio,
-                    easy_chat: a3954::structures::EasyChat {
-                        is_enabled: is_easy_chat_enabled,
-                        wait_time: easy_chat_wait_time,
-                    },
+                    is_easy_chat_enabled,
+                    _unknown5,
                     sound_leak_compensation,
+                    _unknown6,
                     case_language,
+                    easy_chat_wait_time,
                     wearing_detection,
+                    _unknown7,
+                    slide_buttons,
+                ),
+            )) => (
+                input,
+                limit_high_volume,
+                spatial_audio,
+                a3954::structures::EasyChat {
+                    is_enabled: is_easy_chat_enabled,
+                    wait_time: easy_chat_wait_time,
                 },
+                sound_leak_compensation,
+                case_language,
+                wearing_detection,
+                slide_buttons.0.into_iter().collect::<Vec<_>>(),
             ),
-        )
-        .parse_complete(input)
+            None => (
+                input,
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                a3954::BUTTON_CONFIGURATION_SETTINGS
+                    .default_status_collection()
+                    .0
+                    .into_iter()
+                    .skip(8)
+                    .collect::<Vec<_>>(),
+            ),
+        };
+
+        Ok((
+            input,
+            Self {
+                tws_status,
+                battery,
+                firmware_version,
+                serial_number,
+                case_firmware_version,
+                case_battery_level,
+                case_serial_number,
+                equalizer_configuration,
+                hear_id,
+                button_configuration: ButtonStatusCollection(
+                    main_buttons
+                        .0
+                        .into_iter()
+                        .chain(slide_buttons)
+                        .collect_array::<12>()
+                        .expect("we took size 8 and 4, so if that succeeded, we have 12"),
+                ),
+                ambient_sound_mode_cycle,
+                sound_modes,
+                case_features,
+                air_pressure,
+                low_battery_prompt,
+                ldac,
+                dual_connections_enabled,
+                auto_power_off,
+                limit_high_volume,
+                spatial_audio,
+                easy_chat,
+                sound_leak_compensation,
+                case_language,
+                wearing_detection,
+            },
+        ))
     }
 }
 
