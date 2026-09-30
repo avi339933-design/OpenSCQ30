@@ -123,29 +123,51 @@ class AndroidRfcommConnectionBackendImpl(private val context: Context, private v
 
         Log.d(TAG, "selected uuid $uuid")
 
-        val socket = try {
-            device.createRfcommSocketToServiceRecord(uuid)
-        } catch (ex: IOException) {
-            Log.e(TAG, "error creating rfcomm socket", ex)
-            return
+        try {
+            bluetoothManager.adapter.cancelDiscovery()
+        } catch (ex: Exception) {
+            Log.w(TAG, "cancelDiscovery failed", ex)
         }
 
-        try {
-            withContext(Dispatchers.IO) {
-                socket.connect()
-            }
-        } catch (_: CancellationException) {
+        val errors = StringBuilder()
+        var connectedSocket: BluetoothSocket? = null
+        val attempts: List<Pair<String, () -> BluetoothSocket>> = listOf(
+            "secure uuid=$uuid" to { device.createRfcommSocketToServiceRecord(uuid) },
+            "insecure uuid=$uuid" to { device.createInsecureRfcommSocketToServiceRecord(uuid) },
+            "channel 1" to {
+                val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                method.invoke(device, 1) as BluetoothSocket
+            },
+        )
+        for ((name, factory) in attempts) {
+            var candidate: BluetoothSocket? = null
             try {
-                Log.d(TAG, "connection canceled, closing socket")
-                socket.close()
-                return
-            } catch (ex: IOException) {
-                Log.d(TAG, "error closing socket during cancellation", ex)
+                val created = factory()
+                candidate = created
+                withContext(Dispatchers.IO) {
+                    created.connect()
+                }
+                connectedSocket = created
+                Log.d(TAG, "connected using $name")
+                break
+            } catch (ex: CancellationException) {
+                try {
+                    candidate?.close()
+                } catch (_: IOException) {
+                }
+                throw ex
+            } catch (ex: Exception) {
+                errors.append(name).append(": ").append(ex.message).append("\n")
+                Log.w(TAG, "connect attempt failed: $name", ex)
+                try {
+                    candidate?.close()
+                } catch (_: IOException) {
+                }
             }
-        } catch (ex: IOException) {
-            Log.w(TAG, "error connecting to device", ex)
-            throw AndroidException.Other("error connecting to device")
         }
+
+        val socket: BluetoothSocket = connectedSocket
+            ?: throw AndroidException.Other("error connecting to device:\n$errors")
 
         var manualRfcommConnection: ManualRfcommConnection? = null
         manualRfcommConnection = ManualRfcommConnection(
