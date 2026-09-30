@@ -4,7 +4,6 @@ use itertools::Itertools;
 use nom::{
     IResult, Parser,
     bytes::complete::take,
-    combinator::map,
     error::{ContextError, ParseError, context},
 };
 
@@ -88,8 +87,7 @@ impl FromPacketBody for A3954StateUpdatePacket {
     ) -> IResult<&'a [u8], Self, E> {
         let button_parse_settings = a3954::BUTTON_CONFIGURATION_SETTINGS.parse_settings();
 
-        // Part 1: fields that every firmware sends (earbuds firmware 03.23 ends right after
-        // auto power off).
+        // Part 1: fields that every firmware sends.
         let head_result: IResult<&'a [u8], _, E> = context(
             "a3954 state update packet",
             (
@@ -153,10 +151,9 @@ impl FromPacketBody for A3954StateUpdatePacket {
             ),
         ) = head_result?;
 
-        // Part 2: fields that older firmware (03.23) does not send at all. If the packet has
-        // ended, use default values for all of them.
-        let tail = if input.is_empty() {
-            None
+        // Part 2: settings after auto power off. If the packet has already ended, use defaults.
+        let (input, tail) = if input.is_empty() {
+            (input, None)
         } else {
             let tail_result: IResult<&'a [u8], _, E> = context(
                 "a3954 state update packet tail",
@@ -171,43 +168,33 @@ impl FromPacketBody for A3954StateUpdatePacket {
                     a3954::structures::EasyChatWaitTime::take,
                     WearingDetection::take,
                     take(1usize), // unknown
-                    ButtonStatusCollection::<4>::take(array::from_fn::<_, 4, _>(|i| {
-                        button_parse_settings[8 + i]
-                    })),
                 ),
             )
             .parse_complete(input);
             let (input, tail_fields) = tail_result?;
-            Some((input, tail_fields))
+            (input, Some(tail_fields))
         };
 
         let (
-            input,
             limit_high_volume,
             spatial_audio,
             easy_chat,
             sound_leak_compensation,
             case_language,
             wearing_detection,
-            slide_buttons,
         ) = match tail {
             Some((
-                input,
-                (
-                    limit_high_volume,
-                    spatial_audio,
-                    is_easy_chat_enabled,
-                    _unknown5,
-                    sound_leak_compensation,
-                    _unknown6,
-                    case_language,
-                    easy_chat_wait_time,
-                    wearing_detection,
-                    _unknown7,
-                    slide_buttons,
-                ),
+                limit_high_volume,
+                spatial_audio,
+                is_easy_chat_enabled,
+                _unknown5,
+                sound_leak_compensation,
+                _unknown6,
+                case_language,
+                easy_chat_wait_time,
+                wearing_detection,
+                _unknown7,
             )) => (
-                input,
                 limit_high_volume,
                 spatial_audio,
                 a3954::structures::EasyChat {
@@ -217,23 +204,39 @@ impl FromPacketBody for A3954StateUpdatePacket {
                 sound_leak_compensation,
                 case_language,
                 wearing_detection,
-                slide_buttons.0.into_iter().collect::<Vec<_>>(),
             ),
             None => (
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            ),
+        };
+
+        // Part 3: slide buttons. Earbuds firmware 03.23 does not send them (the packet ends
+        // right after the wearing detection section), so use defaults in that case.
+        let (input, slide_buttons) = if input.is_empty() {
+            (
                 input,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
                 a3954::BUTTON_CONFIGURATION_SETTINGS
                     .default_status_collection()
                     .0
                     .into_iter()
                     .skip(8)
                     .collect::<Vec<_>>(),
-            ),
+            )
+        } else {
+            let slide_result: IResult<&'a [u8], _, E> = context(
+                "a3954 state update packet slide buttons",
+                ButtonStatusCollection::<4>::take(array::from_fn::<_, 4, _>(|i| {
+                    button_parse_settings[8 + i]
+                })),
+            )
+            .parse_complete(input);
+            let (input, slide_buttons) = slide_result?;
+            (input, slide_buttons.0.into_iter().collect::<Vec<_>>())
         };
 
         Ok((
