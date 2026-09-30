@@ -5,7 +5,11 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.ScrollView
 import android.widget.TextView
+import com.oppzippy.openscq30.lib.bindings.LanguageIdentifier
+import com.oppzippy.openscq30.lib.bindings.initNativeI18n
 import com.oppzippy.openscq30.lib.bindings.initNativeLogging
+import com.oppzippy.openscq30.lib.bindings.newSession
+import com.oppzippy.openscq30.lib.wrapper.PairedDevice
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +31,7 @@ class MainActivity : Activity() {
         val out = StringBuilder()
         var current: Throwable? = error
         var depth = 0
-        while (current != null && depth < 6) {
+        while (current != null && depth < 4) {
             out.append("[").append(depth).append("] ")
                 .append(current.javaClass.name)
                 .append(": ")
@@ -45,58 +49,78 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         textView = TextView(this)
-        textView.textSize = 13f
+        textView.textSize = 12f
         textView.setPadding(16, 16, 16, 16)
         val scrollView = ScrollView(this)
         scrollView.addView(textView)
         setContentView(scrollView)
 
         line("Android SDK: ${Build.VERSION.SDK_INT}")
-        line("ABI: ${Build.CPU_ABI}")
-
-        val libDir = applicationInfo.nativeLibraryDir
-        val files = File(libDir).list()?.joinToString(", ") ?: "none"
-        line("nativeLibDir files: $files")
 
         try {
             System.loadLibrary("openscq30_android")
-            line("OK: openscq30_android loaded")
-        } catch (t: Throwable) {
-            line("FAIL loadLibrary:\n" + describe(t))
-            return
-        }
-
-        try {
             System.loadLibrary("jnidispatch")
-            line("OK: jnidispatch loaded")
-        } catch (t: Throwable) {
-            line("FAIL jnidispatch:\n" + describe(t))
-        }
-
-        try {
-            Class.forName("com.sun.jna.Native")
-            line("OK: JNA Native class loaded")
-        } catch (t: Throwable) {
-            line("FAIL JNA class:\n" + describe(t))
-            return
-        }
-
-        try {
             initNativeLogging()
-            line("OK: bindings work")
+            initNativeI18n(listOf(LanguageIdentifier("en", null, null, emptyList())))
+            line("OK: native + bindings + i18n")
         } catch (t: Throwable) {
-            line("FAIL bindings:\n" + describe(t))
+            line("FAIL init:\n" + describe(t))
             return
         }
 
         scope.launch {
             try {
-                val backend = AndroidRfcommConnectionBackendImpl(applicationContext, scope)
-                val devices = backend.devices()
-                line("Paired devices: ${devices.size}")
+                val backends = connectionBackends(applicationContext, scope)
+                val devices = AndroidRfcommConnectionBackendImpl(applicationContext, scope).devices()
+                line("Paired bluetooth devices: ${devices.size}")
                 devices.forEach { line("- ${it.name} (${it.macAddress})") }
+
+                val target = devices.firstOrNull { it.name.contains("Liberty", ignoreCase = true) }
+                if (target == null) {
+                    line("No Liberty device found")
+                    return@launch
+                }
+                val mac = target.macAddress
+                line("Target: ${target.name}")
+
+                val session = newSession(File(filesDir, "openscq30.db").absolutePath)
+                line("Session OK")
+
+                var device = try {
+                    session.connectWithBackends(backends, mac)
+                } catch (t: Throwable) {
+                    line("Connect 1 failed:\n" + describe(t))
+                    null
+                }
+
+                if (device == null) {
+                    try {
+                        session.pair(PairedDevice(macAddress = mac, model = "SoundcoreA3954", isDemo = false))
+                        line("Pair OK (model guess SoundcoreA3954)")
+                        device = try {
+                            session.connectWithBackends(backends, mac)
+                        } catch (t: Throwable) {
+                            line("Connect 2 failed:\n" + describe(t))
+                            null
+                        }
+                    } catch (t: Throwable) {
+                        line("Pair failed:\n" + describe(t))
+                    }
+                }
+
+                if (device == null) {
+                    return@launch
+                }
+
+                line("CONNECTED, model=${device.model()}")
+                device.categories().forEach { category ->
+                    line("[$category]")
+                    device.settingsInCategory(category).forEach { id ->
+                        line("  $id = ${device.setting(id).toString().take(100)}")
+                    }
+                }
             } catch (t: Throwable) {
-                line("FAIL devices:\n" + describe(t))
+                line("FAIL:\n" + describe(t))
             }
         }
     }
