@@ -11,6 +11,7 @@ import com.oppzippy.openscq30.lib.bindings.initNativeLogging
 import com.oppzippy.openscq30.lib.bindings.newSession
 import com.oppzippy.openscq30.lib.wrapper.PairedDevice
 import java.io.File
+import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,24 +22,46 @@ class MainActivity : Activity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var textView: TextView
     private val log = StringBuilder()
+    private val numberList = Regex("\\[(\\d+(?:, \\d+)*)\\]")
 
     private fun line(text: String) {
         log.append(text).append("\n")
         textView.text = log.toString()
     }
 
+    private fun dumpArrays(message: String): String {
+        val out = StringBuilder()
+        var index = 0
+        for (match in numberList.findAll(message)) {
+            val bytes = match.groupValues[1].split(", ").map { it.toInt() and 0xFF }
+            if (bytes.size < 8) continue
+            index += 1
+            out.append("array #").append(index).append(" len=").append(bytes.size).append("\n")
+            bytes.chunked(8).forEachIndexed { row, chunk ->
+                out.append(String.format(Locale.US, "%03d:", row * 8))
+                chunk.forEach { out.append(String.format(Locale.US, " %02X", it)) }
+                out.append("\n")
+            }
+        }
+        return out.toString()
+    }
+
     private fun describe(error: Throwable): String {
         val out = StringBuilder()
         var current: Throwable? = error
         var depth = 0
+        var lastDumped = ""
         while (current != null && depth < 4) {
+            val message = current.message ?: ""
+            val shortMessage = if (message.length > 120) message.take(120) + "..." else message
             out.append("[").append(depth).append("] ")
-                .append(current.javaClass.name)
+                .append(current.javaClass.simpleName)
                 .append(": ")
-                .append(current.message)
+                .append(shortMessage)
                 .append("\n")
-            if (current.cause == null) {
-                current.stackTrace.take(3).forEach { out.append("   at ").append(it.toString()).append("\n") }
+            if (message != lastDumped) {
+                out.append(dumpArrays(message))
+                lastDumped = message
             }
             current = current.cause
             depth += 1
