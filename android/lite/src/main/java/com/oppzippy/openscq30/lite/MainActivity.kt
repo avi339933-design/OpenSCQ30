@@ -56,7 +56,8 @@ class MainActivity : Activity() {
 
     private enum class Screen { LIST, PICKER, CONNECTED }
 
-    private data class Row(val name: String, val mac: String, val model: String?)
+    // bonded = already paired in Android's Bluetooth. Rows with bonded=false are nearby devices found by scanning.
+    private data class Row(val name: String, val mac: String, val model: String?, val bonded: Boolean = true)
 
     private class NoiseButton(val option: String, val label: String, val button: Button)
 
@@ -81,6 +82,10 @@ class MainActivity : Activity() {
     private var autoConnectDone = false
     private var resumeMac: String? = null
     private var pendingAfterEnable: (() -> Unit)? = null
+    private var pendingPairMac: String? = null
+
+    private var bondedRows: List<Row> = emptyList()
+    private val discovered = LinkedHashMap<String, String>() // MAC (upper case) -> name
     private var deviceRows: List<Row> = emptyList()
 
     private var statusView: TextView? = null
@@ -136,20 +141,40 @@ class MainActivity : Activity() {
             when (intent.action) {
                 BluetoothDevice.ACTION_FOUND -> {
                     val found = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
-                    if (!isAnker(found.address)) return
-                    line("Found: ${found.name ?: ""} (${found.address})")
-                    if (found.bondState == BluetoothDevice.BOND_NONE) {
-                        BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
-                        line("Pairing...")
-                        found.createBond()
-                    }
+                    val mac = found.address.uppercase(Locale.US)
+                    val name = intent.getStringExtra(BluetoothDevice.EXTRA_NAME) ?: found.name ?: ""
+                    val isNew = !discovered.containsKey(mac)
+                    if (isNew || name.isNotEmpty()) discovered[mac] = name
+                    if (isNew && isAnker(mac)) line("Found: ${name.ifEmpty { "Unknown" }} ($mac)")
+                    if (currentScreen == Screen.LIST) rebuildRows()
                 }
                 BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
                     val changed = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                    val mac = changed.address.uppercase(Locale.US)
                     val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
-                    if (state == BluetoothDevice.BOND_BONDED && isAnker(changed.address)) {
-                        line("Bonded: ${changed.name ?: ""} (${changed.address})")
-                        if (currentScreen == Screen.LIST) refreshDeviceList()
+                    val previous = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
+                    if (mac != pendingPairMac) {
+                        if (state == BluetoothDevice.BOND_BONDED && currentScreen == Screen.LIST) refreshDeviceList()
+                        return
+                    }
+                    if (state == BluetoothDevice.BOND_BONDED) {
+                        pendingPairMac = null
+                        line("Paired: ${changed.name ?: ""} ($mac)")
+                        discovered.remove(mac)
+                        scope.launch {
+                            try {
+                                bondedRows = allRows()
+                                rebuildRows()
+                                val row = bondedRows.firstOrNull { it.mac.equals(mac, ignoreCase = true) }
+                                if (row != null) onDeviceChosen(row)
+                            } catch (t: Throwable) {
+                                if (t is CancellationException) throw t
+                                line("List failed:\n" + describe(t))
+                            }
+                        }
+                    } else if (state == BluetoothDevice.BOND_NONE && previous == BluetoothDevice.BOND_BONDING) {
+                        pendingPairMac = null
+                        line("Pairing failed. Put the earbuds in pairing mode and try again.")
                     }
                 }
                 BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> line("Scan finished")
@@ -277,7 +302,7 @@ class MainActivity : Activity() {
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
         val weight = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }
-        buttons.addView(makeButton("Scan & pair") { startScan() }, weight())
+        buttons.addView(makeButton("Scan") { startScan() }, weight())
         buttons.addView(makeButton("Refresh") { refreshDeviceList() }, weight())
         buttons.addView(showAllButton, weight())
 
@@ -287,7 +312,7 @@ class MainActivity : Activity() {
             if (position < deviceRows.size) onDeviceChosen(deviceRows[position])
         }
         list.setOnItemLongClickListener { _, _, position, _ ->
-            if (position < deviceRows.size) showDeviceMenu(deviceRows[position])
+            if (position < deviceRows.size && deviceRows[position].bonded) showDeviceMenu(deviceRows[position])
             true
         }
 
@@ -315,8 +340,13 @@ class MainActivity : Activity() {
     }
 
     private fun rowText(row: Row): String {
-        val modelLine = if (row.model != null) "-> ${modelName(row.model)}" else "(tap to choose model)"
-        return "${row.name}\n${row.mac}\n$modelLine"
+        val name = row.name.ifEmpty { "Unknown" }
+        val modelLine = when {
+            !row.bonded -> "(nearby - tap to pair)"
+            row.model != null -> "-> ${modelName(row.model)}"
+            else -> "(tap to choose model)"
+        }
+        return "$name\n${row.mac}\n$modelLine"
     }
 
     private fun updateListAdapter() {
@@ -337,15 +367,25 @@ class MainActivity : Activity() {
         }
     }
 
+    // Combines the paired devices and the nearby (scanned) devices into the visible list.
+    private fun rebuildRows() {
+        val bondedMacs = bondedRows.map { it.mac.uppercase(Locale.US) }.toSet()
+        val bonded = bondedRows.filter { showAll || isAnker(it.mac) || it.model != null }
+        val nearby = discovered.entries
+            .filter { it.key !in bondedMacs && (showAll || isAnker(it.key)) }
+            .map { Row(it.value, it.key, null, false) }
+        deviceRows = bonded + nearby
+        updateListAdapter()
+    }
+
     private fun refreshDeviceList() {
         if (session == null) return
         scope.launch {
             try {
-                val all = allRows()
-                deviceRows = all.filter { showAll || isAnker(it.mac) || it.model != null }
-                updateListAdapter()
+                bondedRows = allRows()
+                rebuildRows()
                 if (deviceRows.isEmpty()) {
-                    line("No Anker devices found (${all.size} paired in total). Try Scan & pair, or All: on.")
+                    line("No Anker devices found (${bondedRows.size} paired in total). Press Scan, or All: on.")
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
@@ -355,10 +395,34 @@ class MainActivity : Activity() {
     }
 
     private fun onDeviceChosen(row: Row) {
-        if (row.model != null) {
+        if (!row.bonded) {
+            pairNearby(row)
+        } else if (row.model != null) {
             startConnection(row.mac)
         } else {
             showModelPicker(row)
+        }
+    }
+
+    // Pairs with a nearby device from inside the app (no need to open Android's Bluetooth settings).
+    private fun pairNearby(row: Row) {
+        ensureBluetoothEnabled {
+            val adapter = BluetoothAdapter.getDefaultAdapter()
+            if (adapter != null) {
+                try {
+                    if (adapter.isDiscovering) adapter.cancelDiscovery()
+                    val device = adapter.getRemoteDevice(row.mac)
+                    pendingPairMac = row.mac.uppercase(Locale.US)
+                    line("Pairing with ${row.name.ifEmpty { "Unknown" }}... confirm on the phone if asked")
+                    if (!device.createBond()) {
+                        pendingPairMac = null
+                        line("Pairing could not start")
+                    }
+                } catch (t: Throwable) {
+                    pendingPairMac = null
+                    line("Pairing failed:\n" + describe(t))
+                }
+            }
         }
     }
 
@@ -498,7 +562,9 @@ class MainActivity : Activity() {
             line("Bluetooth is off or unavailable")
             return
         }
-        line("Scanning for Anker devices... put the earbuds in pairing mode")
+        discovered.clear()
+        if (currentScreen == Screen.LIST) rebuildRows()
+        line("Scanning for nearby Anker devices... new earbuds must be in pairing mode")
         if (adapter.isDiscovering) adapter.cancelDiscovery()
         adapter.startDiscovery()
     }
@@ -517,6 +583,7 @@ class MainActivity : Activity() {
                     ?: assigned.singleOrNull()
                 if (target == null) {
                     line("Auto-connect: no device with an assigned model yet")
+                    beginScan()
                     return@launch
                 }
                 line("Auto-connecting to ${target.name}...")
@@ -835,124 +902,4 @@ class MainActivity : Activity() {
         title.setPadding(8, 4, 8, 0)
         root.addView(title)
 
-        val buttons = ArrayList<NoiseButton>()
-        options.chunked(3).forEachIndexed { chunkIndex, chunk ->
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            chunk.forEachIndexed { i, option ->
-                val label = labels.getOrElse(chunkIndex * 3 + i) { option }
-                val button = makeButton(label) {}
-                row.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                buttons.add(NoiseButton(option, label, button))
-            }
-            root.addView(
-                row,
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-            )
-        }
-
-        val group = NoiseGroup(root, buttons)
-        buttons.forEach { nb ->
-            nb.button.setOnClickListener {
-                scope.launch {
-                    try {
-                        (device as OpenScq30Device).setSettingValues(
-                            listOf(SettingIdValuePair(key, Value.StringValue(nb.option))),
-                        )
-                        line("Set ${prettify(key)} = ${nb.label}")
-                        group.highlight(nb.option)
-                    } catch (t: Throwable) {
-                        if (t is CancellationException) throw t
-                        line("Set failed:\n" + describe(t))
-                    }
-                }
-            }
-        }
-        return group
-    }
-
-    // ---------- lifecycle ----------
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        val filter = IntentFilter()
-        filter.addAction(BluetoothDevice.ACTION_FOUND)
-        filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
-        registerReceiver(scanReceiver, filter)
-
-        showList()
-        line("Android SDK: ${Build.VERSION.SDK_INT}")
-
-        try {
-            System.loadLibrary("openscq30_android")
-            System.loadLibrary("jnidispatch")
-            initNativeLogging()
-            initNativeI18n(listOf(LanguageIdentifier("en", null, null, emptyList())))
-            nativeReady = true
-            line("OK: native + bindings + i18n")
-        } catch (t: Throwable) {
-            line("FAIL init:\n" + describe(t))
-            return
-        }
-
-        scope.launch {
-            try {
-                session = newSession(File(filesDir, "openscq30.db").absolutePath)
-                line("Session OK")
-                refreshDeviceList()
-                ensureBluetoothEnabled { autoConnect() }
-            } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                line("Session failed:\n" + describe(t))
-            }
-        }
-    }
-
-    // When the app leaves the screen: close the connection (no polling in the background, and the
-    // earbuds become free for other devices). When it comes back: reconnect automatically.
-    override fun onStop() {
-        super.onStop()
-        if (currentScreen == Screen.CONNECTED && !isFinishing) {
-            val job = connectionJob
-            val wasActive = (job != null && job.isActive) || activeDevice != null
-            if (wasActive) {
-                resumeMac = currentMac
-                disconnect("left app")
-            }
-        }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        val mac = resumeMac
-        resumeMac = null
-        if (mac != null && session != null && nativeReady) {
-            startConnection(mac)
-        }
-    }
-
-    override fun onBackPressed() {
-        when (currentScreen) {
-            Screen.CONNECTED -> {
-                autoConnectDone = true
-                resumeMac = null
-                disconnect("back")
-                showList()
-            }
-            Screen.PICKER -> showList()
-            Screen.LIST -> super.onBackPressed()
-        }
-    }
-
-    override fun onDestroy() {
-        try {
-            unregisterReceiver(scanReceiver)
-        } catch (_: Throwable) {
-        }
-        disconnect("app closed")
-        scope.cancel()
-        super.onDestroy()
-    }
-}
+        val buttons = ArrayList
