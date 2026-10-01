@@ -616,7 +616,7 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun connectNow(mac: String) {
+  private fun connectNow(mac: String) {
         val activeSession = session
         if (activeSession == null || !nativeReady) {
             line("Not ready yet")
@@ -630,8 +630,7 @@ class MainActivity : Activity() {
         line("--- connecting to $mac ---")
         connectionJob = scope.launch {
             try {
-                // Let any previous socket finish closing, and make sure no Bluetooth scan is running
-                // (an active scan disturbs RFCOMM connections).
+                // Let any previous socket finish closing, and make sure no Bluetooth scan is running.
                 delay(500)
                 try {
                     BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
@@ -639,32 +638,11 @@ class MainActivity : Activity() {
                 }
 
                 val backends = connectionBackends(applicationContext, scope)
-                var device: com.oppzippy.openscq30.lib.wrapper.ConnectedDeviceHolder? = null
-                var connectedDevice: Any? = null
-                var attempt = 1
-                while (connectedDevice == null && attempt <= MAX_CONNECT_ATTEMPTS) {
-                    try {
-                        connectedDevice = activeSession.connectWithBackends(backends, mac)
-                    } catch (t: Throwable) {
-                        if (t is CancellationException) throw t
-                        line("Connect failed (attempt $attempt/$MAX_CONNECT_ATTEMPTS):\n" + describe(t))
-                        // Close the half-open socket so the retry starts clean.
-                        try {
-                            ActiveSockets.close(mac)
-                        } catch (_: Throwable) {
-                        }
-                        if (attempt < MAX_CONNECT_ATTEMPTS) {
-                            line("Retrying...")
-                            delay(RETRY_DELAY_MS)
-                        }
-                    }
-                    attempt += 1
-                }
-                if (connectedDevice == null) {
+                val connected = connectWithRetry(activeSession, backends, mac)
+                if (connected == null) {
                     line("Giving up after $MAX_CONNECT_ATTEMPTS attempts. Press Reconnect to try again.")
                     return@launch
                 }
-                val connected = connectedDevice
 
                 activeDevice = connected
                 prefs.edit().putString("last_mac", mac).apply()
@@ -720,6 +698,41 @@ class MainActivity : Activity() {
                 line("FAIL:\n" + describe(t))
             }
         }
+    }
+
+    // Tries to connect up to MAX_CONNECT_ATTEMPTS times. The return type is inferred from
+    // connectWithBackends, so no generated type name needs to be guessed.
+    private suspend fun connectWithRetry(
+        activeSession: OpenScq30Session,
+        backends: com.oppzippy.openscq30.lib.bindings.ManualConnectionBackends,
+        mac: String,
+    ) = run {
+        var result = tryConnectOnce(activeSession, backends, mac, 1)
+        var attempt = 1
+        while (result == null && attempt < MAX_CONNECT_ATTEMPTS) {
+            line("Retrying (attempt ${attempt + 1}/$MAX_CONNECT_ATTEMPTS)...")
+            delay(RETRY_DELAY_MS)
+            attempt += 1
+            result = tryConnectOnce(activeSession, backends, mac, attempt)
+        }
+        result
+    }
+
+    private suspend fun tryConnectOnce(
+        activeSession: OpenScq30Session,
+        backends: com.oppzippy.openscq30.lib.bindings.ManualConnectionBackends,
+        mac: String,
+        attempt: Int,
+    ) = try {
+        activeSession.connectWithBackends(backends, mac)
+    } catch (t: Throwable) {
+        if (t is CancellationException) throw t
+        line("Connect failed (attempt $attempt/$MAX_CONNECT_ATTEMPTS):\n" + describe(t))
+        try {
+            ActiveSockets.close(mac)
+        } catch (_: Throwable) {
+        }
+        null
     }
 
     // ---------- noise mode buttons ----------
