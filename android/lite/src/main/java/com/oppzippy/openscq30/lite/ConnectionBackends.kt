@@ -19,11 +19,41 @@ import com.oppzippy.openscq30.lib.bindings.RfcommServiceSelectionStrategy
 import com.oppzippy.openscq30.lib.wrapper.ConnectionDescriptor
 import com.oppzippy.openscq30.lib.wrapper.ConnectionStatus
 import java.io.IOException
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/**
+ * Keeps track of the open Bluetooth socket per device (by MAC address), so the app can
+ * detect that a connection was lost and can close it explicitly when disconnecting.
+ */
+object ActiveSockets {
+    private val sockets = ConcurrentHashMap<String, BluetoothSocket>()
+
+    private fun key(mac: String): String = mac.uppercase(Locale.US)
+
+    fun register(mac: String, socket: BluetoothSocket) {
+        sockets[key(mac)] = socket
+    }
+
+    fun unregister(mac: String, socket: BluetoothSocket) {
+        if (sockets[key(mac)] === socket) sockets.remove(key(mac))
+    }
+
+    fun isConnected(mac: String): Boolean = sockets.containsKey(key(mac))
+
+    fun close(mac: String) {
+        val socket = sockets.remove(key(mac)) ?: return
+        try {
+            socket.close()
+        } catch (_: IOException) {
+        }
+    }
+}
 
 fun connectionBackends(context: Context, coroutineScope: CoroutineScope): ManualConnectionBackends =
     ManualConnectionBackends(
@@ -169,6 +199,9 @@ class AndroidRfcommConnectionBackendImpl(private val context: Context, private v
         val socket: BluetoothSocket = connectedSocket
             ?: throw AndroidException.Other("error connecting to device:\n$errors")
 
+        val deviceAddress: String = device.address
+        ActiveSockets.register(deviceAddress, socket)
+
         var manualRfcommConnection: ManualRfcommConnection? = null
         manualRfcommConnection = ManualRfcommConnection(
             AndroidRfcommConnectionWriterImpl(
@@ -198,6 +231,7 @@ class AndroidRfcommConnectionBackendImpl(private val context: Context, private v
                         break
                     }
                 }
+                ActiveSockets.unregister(deviceAddress, socket)
                 manualRfcommConnection.setConnectionStatus(ConnectionStatus.Disconnected)
                 try {
                     socket.close()
