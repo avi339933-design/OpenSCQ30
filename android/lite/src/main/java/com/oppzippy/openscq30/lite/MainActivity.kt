@@ -902,4 +902,128 @@ class MainActivity : Activity() {
         title.setPadding(8, 4, 8, 0)
         root.addView(title)
 
-        val buttons = ArrayList
+        val buttons = ArrayList<NoiseButton>()
+        options.chunked(3).forEachIndexed { chunkIndex, chunk ->
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            chunk.forEachIndexed { i, option ->
+                val label = labels.getOrElse(chunkIndex * 3 + i) { option }
+                val button = makeButton(label) {}
+                row.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                buttons.add(NoiseButton(option, label, button))
+            }
+            root.addView(
+                row,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
+        }
+
+        val group = NoiseGroup(root, buttons)
+        buttons.forEach { nb ->
+            nb.button.setOnClickListener {
+                scope.launch {
+                    try {
+                        (device as OpenScq30Device).setSettingValues(
+                            listOf(SettingIdValuePair(key, Value.StringValue(nb.option))),
+                        )
+                        line("Set ${prettify(key)} = ${nb.label}")
+                        group.highlight(nb.option)
+                    } catch (t: Throwable) {
+                        if (t is CancellationException) throw t
+                        line("Set failed:\n" + describe(t))
+                    }
+                }
+            }
+        }
+        return group
+    }
+
+    // ---------- lifecycle ----------
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val filter = IntentFilter()
+        filter.addAction(BluetoothDevice.ACTION_FOUND)
+        filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+        registerReceiver(scanReceiver, filter)
+
+        showList()
+        line("Android SDK: ${Build.VERSION.SDK_INT}")
+
+        try {
+            System.loadLibrary("openscq30_android")
+            System.loadLibrary("jnidispatch")
+            initNativeLogging()
+            initNativeI18n(listOf(LanguageIdentifier("en", null, null, emptyList())))
+            nativeReady = true
+            line("OK: native + bindings + i18n")
+        } catch (t: Throwable) {
+            line("FAIL init:\n" + describe(t))
+            return
+        }
+
+        scope.launch {
+            try {
+                session = newSession(File(filesDir, "openscq30.db").absolutePath)
+                line("Session OK")
+                refreshDeviceList()
+                ensureBluetoothEnabled { autoConnect() }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                line("Session failed:\n" + describe(t))
+            }
+        }
+    }
+
+    // When the app leaves the screen: close the connection (no polling in the background, and the
+    // earbuds become free for other devices). When it comes back: reconnect automatically.
+    override fun onStop() {
+        super.onStop()
+        if (currentScreen == Screen.CONNECTED && !isFinishing) {
+            val job = connectionJob
+            val wasActive = (job != null && job.isActive) || activeDevice != null
+            if (wasActive) {
+                resumeMac = currentMac
+                disconnect("left app")
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val mac = resumeMac
+        resumeMac = null
+        if (mac != null && session != null && nativeReady) {
+            startConnection(mac)
+        }
+    }
+
+    override fun onBackPressed() {
+        when (currentScreen) {
+            Screen.CONNECTED -> {
+                autoConnectDone = true
+                resumeMac = null
+                disconnect("back")
+                showList()
+            }
+            Screen.PICKER -> showList()
+            Screen.LIST -> super.onBackPressed()
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            unregisterReceiver(scanReceiver)
+        } catch (_: Throwable) {
+        }
+        try {
+            BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
+        } catch (_: Throwable) {
+        }
+        disconnect("app closed")
+        scope.cancel()
+        super.onDestroy()
+    }
+}
