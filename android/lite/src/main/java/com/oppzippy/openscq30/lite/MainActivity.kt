@@ -30,7 +30,10 @@ import com.oppzippy.openscq30.lib.bindings.newSession
 import com.oppzippy.openscq30.lib.bindings.translateDeviceModel
 import com.oppzippy.openscq30.lib.wrapper.PairedDevice
 import java.io.File
+import java.lang.reflect.InvocationTargetException
 import java.util.Locale
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.intrinsics.suspendCoroutineUninterceptedOrReturn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,9 +45,23 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class MainActivity : Activity() {
+    companion object {
+        private const val REQUEST_ENABLE_BT = 1001
+    }
+
     private enum class Screen { LIST, PICKER, CONNECTED }
 
     private data class Row(val name: String, val mac: String, val model: String?)
+
+    private class NoiseButton(val option: String, val label: String, val button: Button)
+
+    private class NoiseGroup(val root: LinearLayout, val buttons: List<NoiseButton>) {
+        fun highlight(current: String?) {
+            buttons.forEach {
+                it.button.text = (if (it.option == current) "● " else "") + it.label
+            }
+        }
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs by lazy { getSharedPreferences("lite", MODE_PRIVATE) }
@@ -52,20 +69,29 @@ class MainActivity : Activity() {
     private var session: OpenScq30Session? = null
     private var nativeReady = false
     private var connectionJob: Job? = null
+    private var activeDevice: Any? = null
     private var currentScreen = Screen.LIST
     private var currentMac = ""
     private var showAll = false
+    private var autoConnectDone = false
+    private var pendingAfterEnable: (() -> Unit)? = null
     private var deviceRows: List<Row> = emptyList()
 
     private var statusView: TextView? = null
     private var connectionView: TextView? = null
     private var listView: ListView? = null
+    private var noiseContainer: LinearLayout? = null
+
+    private val noiseGroups = LinkedHashMap<String, NoiseGroup>()
+    private val loggedSkips = HashSet<String>()
+    private var noiseErrorShown = false
 
     private val statusLines = ArrayList<String>()
     private var batteryText = ""
     private var settingsText = ""
 
     private val numberList = Regex("\\[(\\d+(?:, \\d+)*)\\]")
+    private val noiseNameRegex = Regex("(?i)(noise|ambient|transparen)")
     private val refreshIntervalMs = 3000L
 
     // Only devices whose Bluetooth MAC address starts with one of these prefixes (the first 3 bytes,
@@ -193,11 +219,48 @@ class MainActivity : Activity() {
         return button
     }
 
+    // ---------- Bluetooth enable dialog ----------
+
+    private fun ensureBluetoothEnabled(onReady: () -> Unit) {
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+        if (adapter == null) {
+            line("Bluetooth is not supported on this device")
+            return
+        }
+        if (adapter.isEnabled) {
+            onReady()
+            return
+        }
+        pendingAfterEnable = onReady
+        line("Bluetooth is off - asking to enable...")
+        try {
+            startActivityForResult(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQUEST_ENABLE_BT)
+        } catch (t: Throwable) {
+            pendingAfterEnable = null
+            line("Could not ask to enable Bluetooth: ${t.message}")
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_ENABLE_BT) {
+            val next = pendingAfterEnable
+            pendingAfterEnable = null
+            if (resultCode == RESULT_OK) {
+                line("Bluetooth enabled")
+                next?.invoke()
+            } else {
+                line("Bluetooth was not enabled")
+            }
+        }
+    }
+
     // ---------- device list screen ----------
 
     private fun showList() {
         currentScreen = Screen.LIST
         connectionView = null
+        noiseContainer = null
 
         val showAllButton = makeButton(if (showAll) "All: on" else "All: off") {}
         showAllButton.setOnClickListener {
@@ -255,27 +318,28 @@ class MainActivity : Activity() {
         listView?.adapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, texts)
     }
 
+    // All paired (bonded) Bluetooth devices, each with its assigned model (or null).
+    private suspend fun allRows(): List<Row> {
+        val activeSession = session ?: return emptyList()
+        val bonded = AndroidRfcommConnectionBackendImpl(applicationContext, scope).devices()
+        val assigned = activeSession.pairedDevices()
+        return bonded.map { d ->
+            val model = assigned
+                .firstOrNull { it.macAddress.equals(d.macAddress, ignoreCase = true) }
+                ?.model
+            Row(d.name, d.macAddress, model)
+        }
+    }
+
     private fun refreshDeviceList() {
-        val activeSession = session ?: return
+        if (session == null) return
         scope.launch {
             try {
-                val bonded = AndroidRfcommConnectionBackendImpl(applicationContext, scope).devices()
-                val assigned = activeSession.pairedDevices()
-                deviceRows = bonded
-                    .filter { d ->
-                        showAll ||
-                            isAnker(d.macAddress) ||
-                            assigned.any { it.macAddress.equals(d.macAddress, ignoreCase = true) }
-                    }
-                    .map { d ->
-                        val model = assigned
-                            .firstOrNull { it.macAddress.equals(d.macAddress, ignoreCase = true) }
-                            ?.model
-                        Row(d.name, d.macAddress, model)
-                    }
+                val all = allRows()
+                deviceRows = all.filter { showAll || isAnker(it.mac) || it.model != null }
                 updateListAdapter()
                 if (deviceRows.isEmpty()) {
-                    line("No Anker devices found (${bonded.size} paired in total). Try Scan & pair, or All: on.")
+                    line("No Anker devices found (${all.size} paired in total). Try Scan & pair, or All: on.")
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
@@ -308,6 +372,9 @@ class MainActivity : Activity() {
                     scope.launch {
                         try {
                             activeSession.unpair(row.mac)
+                            if (row.mac.equals(prefs.getString("last_mac", null), ignoreCase = true)) {
+                                prefs.edit().remove("last_mac").apply()
+                            }
                             line("Unpaired ${row.name}")
                             refreshDeviceList()
                         } catch (t: Throwable) {
@@ -332,6 +399,7 @@ class MainActivity : Activity() {
         currentScreen = Screen.PICKER
         connectionView = null
         statusView = null
+        noiseContainer = null
 
         val models: List<Pair<String, String>> = try {
             deviceModels()
@@ -415,6 +483,10 @@ class MainActivity : Activity() {
     // ---------- scan ----------
 
     private fun startScan() {
+        ensureBluetoothEnabled { beginScan() }
+    }
+
+    private fun beginScan() {
         val adapter = BluetoothAdapter.getDefaultAdapter()
         if (adapter == null || !adapter.isEnabled) {
             line("Bluetooth is off or unavailable")
@@ -425,12 +497,40 @@ class MainActivity : Activity() {
         adapter.startDiscovery()
     }
 
+    // ---------- auto-connect on app start ----------
+
+    private fun autoConnect() {
+        if (autoConnectDone) return
+        autoConnectDone = true
+        if (session == null) return
+        scope.launch {
+            try {
+                val assigned = allRows().filter { it.model != null }
+                val last = prefs.getString("last_mac", null)
+                val target = assigned.firstOrNull { it.mac.equals(last, ignoreCase = true) }
+                    ?: assigned.singleOrNull()
+                if (target == null) {
+                    line("Auto-connect: no device with an assigned model yet")
+                    return@launch
+                }
+                line("Auto-connecting to ${target.name}...")
+                startConnection(target.mac)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                line("Auto-connect failed:\n" + describe(t))
+            }
+        }
+    }
+
     // ---------- connected screen ----------
 
     private fun showConnectedScreen(mac: String) {
         currentScreen = Screen.CONNECTED
         currentMac = mac
         statusView = null
+        noiseGroups.clear()
+        loggedSkips.clear()
+        noiseErrorShown = false
 
         val text = TextView(this)
         text.textSize = 12f
@@ -438,6 +538,10 @@ class MainActivity : Activity() {
         connectionView = text
         val scrollView = ScrollView(this)
         scrollView.addView(text)
+
+        val noise = LinearLayout(this)
+        noise.orientation = LinearLayout.VERTICAL
+        noiseContainer = noise
 
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
@@ -456,17 +560,66 @@ class MainActivity : Activity() {
             buttons,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
+        root.addView(
+            noise,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
         root.addView(scrollView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
     }
 
+    // ---------- connect / disconnect ----------
+
     private fun startConnection(mac: String) {
+        if (session == null || !nativeReady) {
+            line("Not ready yet")
+            return
+        }
+        ensureBluetoothEnabled { connectNow(mac) }
+    }
+
+    // Tears down the current connection (if any). Returns true if something was active.
+    private fun disconnect(reason: String): Boolean {
+        val job = connectionJob
+        val device = activeDevice
+        val wasActive = (job != null && job.isActive) || device != null
+        connectionJob = null
+        activeDevice = null
+        job?.cancel()
+        if (wasActive) {
+            releaseDevice(device, currentMac)
+            line("Disconnected from $currentMac ($reason)")
+        }
+        return wasActive
+    }
+
+    // Closes the Rust device handle and the Bluetooth socket off the main thread.
+    private fun releaseDevice(device: Any?, mac: String) {
+        Thread {
+            try {
+                if (device is AutoCloseable) {
+                    device.close()
+                } else if (device != null) {
+                    device.javaClass.methods
+                        .firstOrNull { it.name == "destroy" && it.parameterTypes.isEmpty() }
+                        ?.invoke(device)
+                }
+            } catch (_: Throwable) {
+            }
+            try {
+                ActiveSockets.close(mac)
+            } catch (_: Throwable) {
+            }
+        }.start()
+    }
+
+    private fun connectNow(mac: String) {
         val activeSession = session
         if (activeSession == null || !nativeReady) {
             line("Not ready yet")
             return
         }
-        connectionJob?.cancel()
+        val hadActive = disconnect("new connection")
         batteryText = ""
         settingsText = ""
         statusLines.clear()
@@ -474,6 +627,8 @@ class MainActivity : Activity() {
         line("--- connecting to $mac ---")
         connectionJob = scope.launch {
             try {
+                // Give the old socket a moment to close before opening a new one.
+                if (hadActive) delay(700)
                 val backends = connectionBackends(applicationContext, scope)
                 val device = try {
                     activeSession.connectWithBackends(backends, mac)
@@ -484,13 +639,22 @@ class MainActivity : Activity() {
                 }
                 val connected = device ?: return@launch
 
+                activeDevice = connected
+                prefs.edit().putString("last_mac", mac).apply()
                 line("CONNECTED, model=${modelName(connected.model())}")
 
                 // Re-read all settings every few seconds so battery etc. stay current.
                 while (isActive) {
+                    if (!ActiveSockets.isConnected(mac)) {
+                        line("Connection lost - disconnected from $mac")
+                        if (activeDevice === connected) activeDevice = null
+                        releaseDevice(connected, mac)
+                        break
+                    }
                     try {
                         val battery = StringBuilder()
                         val all = StringBuilder()
+                        val noiseIds = ArrayList<Any>()
                         connected.categories().forEach { category ->
                             all.append("[").append(category).append("]\n")
                             connected.settingsInCategory(category).forEach { id ->
@@ -499,11 +663,24 @@ class MainActivity : Activity() {
                                 if (id.toString().contains("attery", ignoreCase = true)) {
                                     battery.append("  ").append(id).append(" = ").append(value).append("\n")
                                 }
+                                if (noiseNameRegex.containsMatchIn(id.toString())) {
+                                    noiseIds.add(id)
+                                }
                             }
                         }
                         batteryText = if (battery.isEmpty()) "" else "[battery summary]\n$battery"
                         settingsText = all.toString()
                         renderStatus()
+
+                        try {
+                            syncNoiseControls(connected, noiseIds)
+                        } catch (t: Throwable) {
+                            if (t is CancellationException) throw t
+                            if (!noiseErrorShown) {
+                                noiseErrorShown = true
+                                line("Noise controls failed:\n" + describe(t))
+                            }
+                        }
                     } catch (t: Throwable) {
                         if (t is CancellationException) throw t
                         settingsText = "Refresh failed:\n" + describe(t)
@@ -516,6 +693,156 @@ class MainActivity : Activity() {
                 line("FAIL:\n" + describe(t))
             }
         }
+    }
+
+    // ---------- noise mode buttons ----------
+    // These helpers use reflection so that the build does not depend on the exact names of the generated
+    // Setting/Value classes. If a button does not appear, the log shows which class/members were found.
+
+    private fun prop(target: Any, name: String): Any? {
+        val getter = "get" + name.substring(0, 1).uppercase(Locale.US) + name.substring(1)
+        val method = target.javaClass.methods.firstOrNull { it.name == getter && it.parameterTypes.isEmpty() }
+            ?: target.javaClass.methods.firstOrNull { it.name == name && it.parameterTypes.isEmpty() }
+        return try {
+            method?.invoke(target)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun members(target: Any): String =
+        target.javaClass.name + " " + target.javaClass.methods
+            .map { it.name }
+            .filter { it.startsWith("get") || it == "value" || it == "options" }
+            .distinct()
+            .joinToString(",")
+
+    // Calls a method by name, whether it is a normal function or a suspend function.
+    private suspend fun callAny(target: Any, name: String, vararg args: Any?): Any? {
+        val methods = target.javaClass.methods.filter { it.name == name }
+        val plain = methods.firstOrNull { it.parameterTypes.size == args.size }
+        try {
+            if (plain != null) return plain.invoke(target, *args)
+            val suspending = methods.firstOrNull {
+                it.parameterTypes.size == args.size + 1 &&
+                    Continuation::class.java.isAssignableFrom(it.parameterTypes.last())
+            } ?: throw NoSuchMethodException("$name(${args.size} args) on ${target.javaClass.name}")
+            return suspendCoroutineUninterceptedOrReturn<Any?> { cont ->
+                suspending.invoke(target, *args, cont)
+            }
+        } catch (e: InvocationTargetException) {
+            throw e.targetException ?: e
+        }
+    }
+
+    private fun makeStringValue(text: String): Any {
+        val bases = listOf(
+            "com.oppzippy.openscq30.lib.wrapper.Value",
+            "com.oppzippy.openscq30.lib.bindings.Value",
+        )
+        val nested = listOf("String", "StringValue", "Str")
+        for (base in bases) {
+            for (name in nested) {
+                try {
+                    val cls = Class.forName(base + "$" + name)
+                    return cls.getConstructor(String::class.java).newInstance(text)
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        throw IllegalStateException("Value.String class not found (tried $bases)")
+    }
+
+    private fun isPlainSelect(typeName: String): Boolean =
+        typeName.contains("Select") &&
+            !typeName.contains("Optional") &&
+            !typeName.contains("Modifiable") &&
+            !typeName.contains("Multi")
+
+    private fun prettify(key: String): String = key.replace(Regex("([a-z])([A-Z])"), "$1 $2")
+
+    private suspend fun syncNoiseControls(device: Any, ids: List<Any>) {
+        for (id in ids) {
+            val key = id.toString()
+            val setting = callAny(device, "setting", id) ?: continue
+            val typeName = setting.javaClass.simpleName
+            if (!isPlainSelect(typeName)) {
+                if (loggedSkips.add("type:$key")) line("(noise: skipped $key, type $typeName)")
+                continue
+            }
+            val select = prop(setting, "setting") ?: setting
+            val options = (prop(select, "options") as? List<*>)?.map { it.toString() }
+            if (options == null || options.isEmpty()) {
+                if (loggedSkips.add("opt:$key")) line("(noise: no options for $key: ${members(select)})")
+                continue
+            }
+            val labels = (prop(select, "localizedOptions") as? List<*>)?.map { it.toString() } ?: options
+            val current = prop(setting, "value")?.toString()
+
+            var group = noiseGroups[key]
+            if (group == null) {
+                group = buildNoiseGroup(device, id, key, options, labels)
+                noiseGroups[key] = group
+                noiseContainer?.addView(
+                    group.root,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+            }
+            group.highlight(current)
+        }
+    }
+
+    private fun buildNoiseGroup(
+        device: Any,
+        id: Any,
+        key: String,
+        options: List<String>,
+        labels: List<String>,
+    ): NoiseGroup {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+
+        val title = TextView(this)
+        title.text = prettify(key)
+        title.textSize = 12f
+        title.setPadding(8, 4, 8, 0)
+        root.addView(title)
+
+        val buttons = ArrayList<NoiseButton>()
+        options.chunked(3).forEachIndexed { chunkIndex, chunk ->
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            chunk.forEachIndexed { i, option ->
+                val label = labels.getOrElse(chunkIndex * 3 + i) { option }
+                val button = makeButton(label) {}
+                row.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                buttons.add(NoiseButton(option, label, button))
+            }
+            root.addView(
+                row,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
+        }
+
+        val group = NoiseGroup(root, buttons)
+        buttons.forEach { nb ->
+            nb.button.setOnClickListener {
+                scope.launch {
+                    try {
+                        callAny(device, "setSetting", id, makeStringValue(nb.option))
+                        line("Set ${prettify(key)} = ${nb.label}")
+                        group.highlight(nb.option)
+                    } catch (t: Throwable) {
+                        if (t is CancellationException) throw t
+                        line("Set failed:\n" + describe(t))
+                    }
+                }
+            }
+        }
+        return group
     }
 
     // ---------- lifecycle ----------
@@ -549,6 +876,7 @@ class MainActivity : Activity() {
                 session = newSession(File(filesDir, "openscq30.db").absolutePath)
                 line("Session OK")
                 refreshDeviceList()
+                ensureBluetoothEnabled { autoConnect() }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 line("Session failed:\n" + describe(t))
@@ -559,7 +887,8 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when (currentScreen) {
             Screen.CONNECTED -> {
-                connectionJob?.cancel()
+                autoConnectDone = true
+                disconnect("back")
                 showList()
             }
             Screen.PICKER -> showList()
@@ -572,6 +901,7 @@ class MainActivity : Activity() {
             unregisterReceiver(scanReceiver)
         } catch (_: Throwable) {
         }
+        disconnect("app closed")
         scope.cancel()
         super.onDestroy()
     }
