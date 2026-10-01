@@ -47,6 +47,8 @@ import kotlinx.coroutines.launch
 class MainActivity : Activity() {
     companion object {
         private const val REQUEST_ENABLE_BT = 1001
+        private const val MAX_CONNECT_ATTEMPTS = 3
+        private const val RETRY_DELAY_MS = 1500L
     }
 
     private enum class Screen { LIST, PICKER, CONNECTED }
@@ -74,6 +76,7 @@ class MainActivity : Activity() {
     private var currentMac = ""
     private var showAll = false
     private var autoConnectDone = false
+    private var resumeMac: String? = null
     private var pendingAfterEnable: (() -> Unit)? = null
     private var deviceRows: List<Row> = emptyList()
 
@@ -619,7 +622,7 @@ class MainActivity : Activity() {
             line("Not ready yet")
             return
         }
-        val hadActive = disconnect("new connection")
+        disconnect("new connection")
         batteryText = ""
         settingsText = ""
         statusLines.clear()
@@ -627,23 +630,47 @@ class MainActivity : Activity() {
         line("--- connecting to $mac ---")
         connectionJob = scope.launch {
             try {
-                // Give the old socket a moment to close before opening a new one.
-                if (hadActive) delay(700)
-                val backends = connectionBackends(applicationContext, scope)
-                val device = try {
-                    activeSession.connectWithBackends(backends, mac)
-                } catch (t: Throwable) {
-                    if (t is CancellationException) throw t
-                    line("Connect failed:\n" + describe(t))
-                    null
+                // Let any previous socket finish closing, and make sure no Bluetooth scan is running
+                // (an active scan disturbs RFCOMM connections).
+                delay(500)
+                try {
+                    BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
+                } catch (_: Throwable) {
                 }
-                val connected = device ?: return@launch
+
+                val backends = connectionBackends(applicationContext, scope)
+                var device: com.oppzippy.openscq30.lib.wrapper.ConnectedDeviceHolder? = null
+                var connectedDevice: Any? = null
+                var attempt = 1
+                while (connectedDevice == null && attempt <= MAX_CONNECT_ATTEMPTS) {
+                    try {
+                        connectedDevice = activeSession.connectWithBackends(backends, mac)
+                    } catch (t: Throwable) {
+                        if (t is CancellationException) throw t
+                        line("Connect failed (attempt $attempt/$MAX_CONNECT_ATTEMPTS):\n" + describe(t))
+                        // Close the half-open socket so the retry starts clean.
+                        try {
+                            ActiveSockets.close(mac)
+                        } catch (_: Throwable) {
+                        }
+                        if (attempt < MAX_CONNECT_ATTEMPTS) {
+                            line("Retrying...")
+                            delay(RETRY_DELAY_MS)
+                        }
+                    }
+                    attempt += 1
+                }
+                if (connectedDevice == null) {
+                    line("Giving up after $MAX_CONNECT_ATTEMPTS attempts. Press Reconnect to try again.")
+                    return@launch
+                }
+                val connected = connectedDevice
 
                 activeDevice = connected
                 prefs.edit().putString("last_mac", mac).apply()
                 line("CONNECTED, model=${modelName(connected.model())}")
 
-                // Re-read all settings every few seconds so battery etc. stay current.
+                // Re-read all settings every few seconds (only while the app is on screen).
                 while (isActive) {
                     if (!ActiveSockets.isConnected(mac)) {
                         line("Connection lost - disconnected from $mac")
@@ -884,10 +911,34 @@ class MainActivity : Activity() {
         }
     }
 
+    // When the app leaves the screen: close the connection (no polling in the background, and the
+    // earbuds become free for other devices). When it comes back: reconnect automatically.
+    override fun onStop() {
+        super.onStop()
+        if (currentScreen == Screen.CONNECTED && !isFinishing) {
+            val job = connectionJob
+            val wasActive = (job != null && job.isActive) || activeDevice != null
+            if (wasActive) {
+                resumeMac = currentMac
+                disconnect("left app")
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val mac = resumeMac
+        resumeMac = null
+        if (mac != null && session != null && nativeReady) {
+            startConnection(mac)
+        }
+    }
+
     override fun onBackPressed() {
         when (currentScreen) {
             Screen.CONNECTED -> {
                 autoConnectDone = true
+                resumeMac = null
                 disconnect("back")
                 showList()
             }
