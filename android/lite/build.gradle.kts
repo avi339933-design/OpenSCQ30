@@ -22,6 +22,20 @@ android {
         multiDexEnabled = true // NEW
     }
 
+    // Fixed debug signing key, so every build can be installed over the previous one.
+    // The key file is created once by .github/workflows/create-debug-keystore.yml.
+    val fixedDebugKeystore = file("debug.keystore")
+    if (fixedDebugKeystore.exists()) {
+        signingConfigs {
+            getByName("debug") {
+                storeFile = fixedDebugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
