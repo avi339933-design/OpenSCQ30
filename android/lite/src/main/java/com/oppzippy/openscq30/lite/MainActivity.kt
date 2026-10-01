@@ -22,13 +22,16 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.oppzippy.openscq30.lib.bindings.LanguageIdentifier
+import com.oppzippy.openscq30.lib.bindings.OpenScq30Device
 import com.oppzippy.openscq30.lib.bindings.OpenScq30Session
+import com.oppzippy.openscq30.lib.bindings.SettingIdValuePair
 import com.oppzippy.openscq30.lib.bindings.deviceModels
 import com.oppzippy.openscq30.lib.bindings.initNativeI18n
 import com.oppzippy.openscq30.lib.bindings.initNativeLogging
 import com.oppzippy.openscq30.lib.bindings.newSession
 import com.oppzippy.openscq30.lib.bindings.translateDeviceModel
 import com.oppzippy.openscq30.lib.wrapper.PairedDevice
+import com.oppzippy.openscq30.lib.wrapper.Value
 import java.io.File
 import java.lang.reflect.InvocationTargetException
 import java.util.Locale
@@ -616,7 +619,7 @@ class MainActivity : Activity() {
         }.start()
     }
 
-  private fun connectNow(mac: String) {
+    private fun connectNow(mac: String) {
         val activeSession = session
         if (activeSession == null || !nativeReady) {
             line("Not ready yet")
@@ -736,8 +739,8 @@ class MainActivity : Activity() {
     }
 
     // ---------- noise mode buttons ----------
-    // These helpers use reflection so that the build does not depend on the exact names of the generated
-    // Setting/Value classes. If a button does not appear, the log shows which class/members were found.
+    // Reading the settings uses reflection (so the build does not depend on the exact generated class names).
+    // Sending a new value uses the real API: device.setSettingValues(listOf(SettingIdValuePair(id, value))).
 
     private fun prop(target: Any, name: String): Any? {
         val getter = "get" + name.substring(0, 1).uppercase(Locale.US) + name.substring(1)
@@ -775,24 +778,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun makeStringValue(text: String): Any {
-        val bases = listOf(
-            "com.oppzippy.openscq30.lib.wrapper.Value",
-            "com.oppzippy.openscq30.lib.bindings.Value",
-        )
-        val nested = listOf("String", "StringValue", "Str")
-        for (base in bases) {
-            for (name in nested) {
-                try {
-                    val cls = Class.forName(base + "$" + name)
-                    return cls.getConstructor(String::class.java).newInstance(text)
-                } catch (_: Throwable) {
-                }
-            }
-        }
-        throw IllegalStateException("Value.String class not found (tried $bases)")
-    }
-
     private fun isPlainSelect(typeName: String): Boolean =
         typeName.contains("Select") &&
             !typeName.contains("Optional") &&
@@ -821,7 +806,7 @@ class MainActivity : Activity() {
 
             var group = noiseGroups[key]
             if (group == null) {
-                group = buildNoiseGroup(device, id, key, options, labels)
+                group = buildNoiseGroup(device, key, options, labels)
                 noiseGroups[key] = group
                 noiseContainer?.addView(
                     group.root,
@@ -837,7 +822,6 @@ class MainActivity : Activity() {
 
     private fun buildNoiseGroup(
         device: Any,
-        id: Any,
         key: String,
         options: List<String>,
         labels: List<String>,
@@ -872,7 +856,9 @@ class MainActivity : Activity() {
             nb.button.setOnClickListener {
                 scope.launch {
                     try {
-                        callAny(device, "setSetting", id, makeStringValue(nb.option))
+                        (device as OpenScq30Device).setSettingValues(
+                            listOf(SettingIdValuePair(key, Value.StringValue(nb.option))),
+                        )
                         line("Set ${prettify(key)} = ${nb.label}")
                         group.highlight(nb.option)
                     } catch (t: Throwable) {
