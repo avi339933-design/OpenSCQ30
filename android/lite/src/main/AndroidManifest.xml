@@ -5,6 +5,7 @@
     <application
         android:name=".LiteApplication"
         android:label="OpenSCQ30 Lite"
+        android:supportsRtl="true"
         android:theme="@android:style/Theme.Holo">
         <activity
             android:name=".MainActivity"
