@@ -12,13 +12,16 @@ import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import com.oppzippy.openscq30.lib.bindings.LanguageIdentifier
@@ -31,12 +34,10 @@ import com.oppzippy.openscq30.lib.bindings.initNativeLogging
 import com.oppzippy.openscq30.lib.bindings.newSession
 import com.oppzippy.openscq30.lib.bindings.translateDeviceModel
 import com.oppzippy.openscq30.lib.wrapper.PairedDevice
+import com.oppzippy.openscq30.lib.wrapper.Setting
 import com.oppzippy.openscq30.lib.wrapper.Value
 import java.io.File
-import java.lang.reflect.InvocationTargetException
 import java.util.Locale
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.intrinsics.suspendCoroutineUninterceptedOrReturn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,15 +60,9 @@ class MainActivity : Activity() {
     // bonded = already paired in Android's Bluetooth. Rows with bonded=false are nearby devices found by scanning.
     private data class Row(val name: String, val mac: String, val model: String?, val bonded: Boolean = true)
 
-    private class NoiseButton(val option: String, val label: String, val button: Button)
+    private class SettingItem(val category: String, val key: String, val setting: Any?)
 
-    private class NoiseGroup(val root: LinearLayout, val buttons: List<NoiseButton>) {
-        fun highlight(current: String?) {
-            buttons.forEach {
-                it.button.text = (if (it.option == current) "● " else "") + it.label
-            }
-        }
-    }
+    private class ChoiceButton(val option: String?, val label: String, val button: Button)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs by lazy { getSharedPreferences("lite", MODE_PRIVATE) }
@@ -91,18 +86,18 @@ class MainActivity : Activity() {
     private var statusView: TextView? = null
     private var connectionView: TextView? = null
     private var listView: ListView? = null
-    private var noiseContainer: LinearLayout? = null
+    private var settingsContainer: LinearLayout? = null
 
-    private val noiseGroups = LinkedHashMap<String, NoiseGroup>()
+    // One entry per setting id: a function that refreshes its control from a new value.
+    private val controls = HashMap<String, (Any?) -> Unit>()
+    private val sections = HashMap<String, LinearLayout>()
     private val loggedSkips = HashSet<String>()
-    private var noiseErrorShown = false
+    private var updatingUi = false
+    private var lastRefreshError = ""
 
     private val statusLines = ArrayList<String>()
-    private var batteryText = ""
-    private var settingsText = ""
 
     private val numberList = Regex("\\[(\\d+(?:, \\d+)*)\\]")
-    private val noiseNameRegex = Regex("(?i)(noise|ambient|transparen)")
     private val refreshIntervalMs = 3000L
 
     // Only devices whose Bluetooth MAC address starts with one of these prefixes (the first 3 bytes,
@@ -192,8 +187,7 @@ class MainActivity : Activity() {
 
     private fun renderStatus() {
         when (currentScreen) {
-            Screen.CONNECTED ->
-                connectionView?.text = statusLines.takeLast(40).joinToString("\n") + "\n" + batteryText + settingsText
+            Screen.CONNECTED -> connectionView?.text = statusLines.takeLast(15).joinToString("\n")
             else -> statusView?.text = statusLines.takeLast(5).joinToString("\n")
         }
     }
@@ -250,6 +244,9 @@ class MainActivity : Activity() {
         return button
     }
 
+    private fun matchWrap() =
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+
     // ---------- Bluetooth enable dialog ----------
 
     private fun ensureBluetoothEnabled(onReady: () -> Unit) {
@@ -291,7 +288,7 @@ class MainActivity : Activity() {
     private fun showList() {
         currentScreen = Screen.LIST
         connectionView = null
-        noiseContainer = null
+        settingsContainer = null
 
         val showAllButton = makeButton(if (showAll) "All: on" else "All: off") {}
         showAllButton.setOnClickListener {
@@ -323,15 +320,9 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.addView(
-            buttons,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
+        root.addView(buttons, matchWrap())
         root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        root.addView(
-            status,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
+        root.addView(status, matchWrap())
         setContentView(root)
 
         updateListAdapter()
@@ -469,7 +460,7 @@ class MainActivity : Activity() {
         currentScreen = Screen.PICKER
         connectionView = null
         statusView = null
-        noiseContainer = null
+        settingsContainer = null
 
         val models: List<Pair<String, String>> = try {
             deviceModels()
@@ -520,14 +511,8 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.addView(
-            title,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
-        root.addView(
-            search,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
+        root.addView(title, matchWrap())
+        root.addView(search, matchWrap())
         root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
         update()
@@ -601,20 +586,27 @@ class MainActivity : Activity() {
         currentScreen = Screen.CONNECTED
         currentMac = mac
         statusView = null
-        noiseGroups.clear()
+        controls.clear()
+        sections.clear()
         loggedSkips.clear()
-        noiseErrorShown = false
+        lastRefreshError = ""
 
-        val text = TextView(this)
-        text.textSize = 12f
-        text.setPadding(16, 16, 16, 16)
-        connectionView = text
+        val container = LinearLayout(this)
+        container.orientation = LinearLayout.VERTICAL
+        settingsContainer = container
+
+        val log = TextView(this)
+        log.textSize = 11f
+        log.setPadding(16, 16, 16, 16)
+        connectionView = log
+
+        val content = LinearLayout(this)
+        content.orientation = LinearLayout.VERTICAL
+        content.addView(container, matchWrap())
+        content.addView(log, matchWrap())
+
         val scrollView = ScrollView(this)
-        scrollView.addView(text)
-
-        val noise = LinearLayout(this)
-        noise.orientation = LinearLayout.VERTICAL
-        noiseContainer = noise
+        scrollView.addView(content)
 
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
@@ -629,16 +621,10 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.addView(
-            buttons,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
-        root.addView(
-            noise,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
+        root.addView(buttons, matchWrap())
         root.addView(scrollView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
+        renderStatus()
     }
 
     // ---------- connect / disconnect ----------
@@ -693,8 +679,6 @@ class MainActivity : Activity() {
             return
         }
         disconnect("new connection")
-        batteryText = ""
-        settingsText = ""
         statusLines.clear()
         showConnectedScreen(mac)
         line("--- connecting to $mac ---")
@@ -727,39 +711,21 @@ class MainActivity : Activity() {
                         break
                     }
                     try {
-                        val battery = StringBuilder()
-                        val all = StringBuilder()
-                        val noiseIds = ArrayList<Any>()
+                        val items = ArrayList<SettingItem>()
                         connected.categories().forEach { category ->
-                            all.append("[").append(category).append("]\n")
                             connected.settingsInCategory(category).forEach { id ->
-                                val value = connected.setting(id).toString().take(100)
-                                all.append("  ").append(id).append(" = ").append(value).append("\n")
-                                if (id.toString().contains("attery", ignoreCase = true)) {
-                                    battery.append("  ").append(id).append(" = ").append(value).append("\n")
-                                }
-                                if (noiseNameRegex.containsMatchIn(id.toString())) {
-                                    noiseIds.add(id)
-                                }
+                                items.add(SettingItem(category.toString(), id.toString(), connected.setting(id)))
                             }
                         }
-                        batteryText = if (battery.isEmpty()) "" else "[battery summary]\n$battery"
-                        settingsText = all.toString()
-                        renderStatus()
-
-                        try {
-                            syncNoiseControls(connected, noiseIds)
-                        } catch (t: Throwable) {
-                            if (t is CancellationException) throw t
-                            if (!noiseErrorShown) {
-                                noiseErrorShown = true
-                                line("Noise controls failed:\n" + describe(t))
-                            }
-                        }
+                        syncSettings(connected, items)
+                        lastRefreshError = ""
                     } catch (t: Throwable) {
                         if (t is CancellationException) throw t
-                        settingsText = "Refresh failed:\n" + describe(t)
-                        renderStatus()
+                        val text = describe(t)
+                        if (text != lastRefreshError) {
+                            lastRefreshError = text
+                            line("Refresh failed:\n$text")
+                        }
                     }
                     delay(refreshIntervalMs)
                 }
@@ -805,137 +771,332 @@ class MainActivity : Activity() {
         null
     }
 
-    // ---------- noise mode buttons ----------
-    // Reading the settings uses reflection (so the build does not depend on the exact generated class names).
-    // Sending a new value uses the real API: device.setSettingValues(listOf(SettingIdValuePair(id, value))).
+    // ---------- generic settings screen ----------
+    // Every setting returned by the core gets a control matching its type. Changing a control sends the new
+    // value with device.setSettingValues(listOf(SettingIdValuePair(id, value))).
 
-    private fun prop(target: Any, name: String): Any? {
-        val getter = "get" + name.substring(0, 1).uppercase(Locale.US) + name.substring(1)
-        val method = target.javaClass.methods.firstOrNull { it.name == getter && it.parameterTypes.isEmpty() }
-            ?: target.javaClass.methods.firstOrNull { it.name == name && it.parameterTypes.isEmpty() }
-        return try {
-            method?.invoke(target)
-        } catch (_: Throwable) {
-            null
+    private fun prettify(key: String): String =
+        key.replace(Regex("([a-z])([A-Z])"), "$1 $2").replaceFirstChar { it.uppercase(Locale.US) }
+
+    private fun sendValue(device: Any, key: String, value: Value, description: String) {
+        scope.launch {
+            try {
+                (device as OpenScq30Device).setSettingValues(listOf(SettingIdValuePair(key, value)))
+                line("Set $description")
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                line("Set failed:\n" + describe(t))
+            }
         }
     }
 
-    private fun members(target: Any): String =
-        target.javaClass.name + " " + target.javaClass.methods
-            .map { it.name }
-            .filter { it.startsWith("get") || it == "value" || it == "options" }
-            .distinct()
-            .joinToString(",")
-
-    // Calls a method by name, whether it is a normal function or a suspend function.
-    private suspend fun callAny(target: Any, name: String, vararg args: Any?): Any? {
-        val methods = target.javaClass.methods.filter { it.name == name }
-        val plain = methods.firstOrNull { it.parameterTypes.size == args.size }
-        try {
-            if (plain != null) return plain.invoke(target, *args)
-            val suspending = methods.firstOrNull {
-                it.parameterTypes.size == args.size + 1 &&
-                    Continuation::class.java.isAssignableFrom(it.parameterTypes.last())
-            } ?: throw NoSuchMethodException("$name(${args.size} args) on ${target.javaClass.name}")
-            return suspendCoroutineUninterceptedOrReturn<Any?> { cont ->
-                suspending.invoke(target, *args, cont)
+    private fun syncSettings(device: Any, items: List<SettingItem>) {
+        val container = settingsContainer ?: return
+        for (item in items) {
+            val setting = item.setting ?: continue
+            var updater = controls[item.key]
+            if (updater == null) {
+                val built = buildControl(device, item.key, setting)
+                if (built == null) {
+                    if (loggedSkips.add(item.key)) line("(skipped ${item.key}: ${setting.javaClass.simpleName})")
+                    continue
+                }
+                var section = sections[item.category]
+                if (section == null) {
+                    section = LinearLayout(this)
+                    section.orientation = LinearLayout.VERTICAL
+                    val header = TextView(this)
+                    header.text = prettify(item.category)
+                    header.textSize = 14f
+                    header.setPadding(8, 16, 8, 4)
+                    section.addView(header)
+                    container.addView(section, matchWrap())
+                    sections[item.category] = section
+                }
+                section.addView(built.first, matchWrap())
+                controls[item.key] = built.second
+                updater = built.second
             }
-        } catch (e: InvocationTargetException) {
-            throw e.targetException ?: e
+            updatingUi = true
+            try {
+                updater(setting)
+            } finally {
+                updatingUi = false
+            }
         }
     }
 
-    private fun isPlainSelect(typeName: String): Boolean =
-        typeName.contains("Select") &&
-            !typeName.contains("Optional") &&
-            !typeName.contains("Modifiable") &&
-            !typeName.contains("Multi")
-
-    private fun prettify(key: String): String = key.replace(Regex("([a-z])([A-Z])"), "$1 $2")
-
-    private suspend fun syncNoiseControls(device: Any, ids: List<Any>) {
-        for (id in ids) {
-            val key = id.toString()
-            val setting = callAny(device, "setting", id) ?: continue
-            val typeName = setting.javaClass.simpleName
-            if (!isPlainSelect(typeName)) {
-                if (loggedSkips.add("type:$key")) line("(noise: skipped $key, type $typeName)")
-                continue
+    private fun buildControl(device: Any, key: String, setting: Any): Pair<View, (Any?) -> Unit>? {
+        return when (setting) {
+            is Setting.ToggleSetting -> toggleControl(device, key, setting)
+            is Setting.I32RangeSetting -> rangeControl(device, key, setting)
+            is Setting.EqualizerSetting -> equalizerControl(device, key, setting)
+            is Setting.SelectSetting -> choiceControl(
+                device, key, setting.setting.options, setting.setting.localizedOptions, false,
+                { (it as? Setting.SelectSetting)?.value },
+                { Value.StringValue(it ?: "") },
+            )
+            is Setting.OptionalSelectSetting -> choiceControl(
+                device, key, setting.setting.options, setting.setting.localizedOptions, true,
+                { (it as? Setting.OptionalSelectSetting)?.value },
+                { Value.OptionalStringValue(it) },
+            )
+            is Setting.PresetEqualizerProfileSelect -> choiceControl(
+                device, key, setting.select.options, setting.select.localizedOptions, true,
+                { (it as? Setting.PresetEqualizerProfileSelect)?.value },
+                { Value.OptionalStringValue(it) },
+            )
+            is Setting.ModifiableSelectSetting ->
+                if (setting.setting.options.isEmpty()) {
+                    infoControl(key, "(empty)") { "(empty)" }
+                } else {
+                    choiceControl(
+                        device, key, setting.setting.options, setting.setting.localizedOptions, true,
+                        { (it as? Setting.ModifiableSelectSetting)?.value },
+                        { Value.OptionalStringValue(it) },
+                    )
+                }
+            is Setting.MultiSelectSetting ->
+                if (setting.setting.options.isEmpty()) {
+                    infoControl(key, "(empty)") { "(empty)" }
+                } else {
+                    multiControl(device, key, setting)
+                }
+            is Setting.InformationSetting -> infoControl(key, setting.translatedValue) {
+                (it as? Setting.InformationSetting)?.translatedValue ?: ""
             }
-            val select = prop(setting, "setting") ?: setting
-            val options = (prop(select, "options") as? List<*>)?.map { it.toString() }
-            if (options == null || options.isEmpty()) {
-                if (loggedSkips.add("opt:$key")) line("(noise: no options for $key: ${members(select)})")
-                continue
-            }
-            val labels = (prop(select, "localizedOptions") as? List<*>)?.map { it.toString() } ?: options
-            val current = prop(setting, "value")?.toString()
-
-            var group = noiseGroups[key]
-            if (group == null) {
-                group = buildNoiseGroup(device, key, options, labels)
-                noiseGroups[key] = group
-                noiseContainer?.addView(
-                    group.root,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
-            }
-            group.highlight(current)
+            else -> null
         }
     }
 
-    private fun buildNoiseGroup(
+    private fun infoControl(key: String, initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
+        val view = TextView(this)
+        view.textSize = 13f
+        view.setPadding(8, 4, 8, 4)
+        view.text = "${prettify(key)}: $initial"
+        return Pair(view, { s -> view.text = "${prettify(key)}: ${textOf(s)}" })
+    }
+
+    private fun toggleControl(device: Any, key: String, setting: Setting.ToggleSetting): Pair<View, (Any?) -> Unit> {
+        val box = CheckBox(this)
+        box.text = prettify(key)
+        box.textSize = 13f
+        box.isChecked = setting.value
+        box.setOnCheckedChangeListener { _, checked ->
+            if (!updatingUi) sendValue(device, key, Value.BoolValue(checked), "${prettify(key)} = $checked")
+        }
+        val updater: (Any?) -> Unit = { s ->
+            if (s is Setting.ToggleSetting) box.isChecked = s.value
+        }
+        return Pair(box, updater)
+    }
+
+    private fun rangeControl(device: Any, key: String, setting: Setting.I32RangeSetting): Pair<View, (Any?) -> Unit> {
+        val range = setting.setting
+        val start = range.start
+        val step = if (range.step <= 0) 1 else range.step
+        val max = (range.end - start) / step
+
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        val label = TextView(this)
+        label.textSize = 13f
+        label.setPadding(8, 4, 8, 0)
+        val bar = SeekBar(this)
+        bar.max = max
+        bar.progress = (setting.value - start) / step
+        label.text = "${prettify(key)}: ${setting.value}"
+        var dragging = false
+        bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                label.text = "${prettify(key)}: ${start + progress * step}"
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) {
+                dragging = true
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                dragging = false
+                val value = start + seekBar.progress * step
+                sendValue(device, key, Value.I32Value(value), "${prettify(key)} = $value")
+            }
+        })
+        root.addView(label, matchWrap())
+        root.addView(bar, matchWrap())
+        val updater: (Any?) -> Unit = { s ->
+            if (s is Setting.I32RangeSetting && !dragging) {
+                bar.progress = (s.value - start) / step
+                label.text = "${prettify(key)}: ${s.value}"
+            }
+        }
+        return Pair(root, updater)
+    }
+
+    private fun equalizerControl(
+        device: Any,
+        key: String,
+        setting: Setting.EqualizerSetting,
+    ): Pair<View, (Any?) -> Unit> {
+        val eq = setting.setting
+        val bandCount = eq.bandHz.size
+        val min = eq.min.toInt()
+        val max = eq.max.toInt()
+        val scale = Math.pow(10.0, eq.fractionDigits.toDouble())
+        val values = IntArray(bandCount) { setting.value.getOrElse(it) { 0 }.toInt() }
+        val dragging = BooleanArray(bandCount)
+
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        val title = TextView(this)
+        title.text = prettify(key)
+        title.textSize = 13f
+        title.setPadding(8, 4, 8, 0)
+        root.addView(title)
+
+        val labels = ArrayList<TextView>()
+        val bars = ArrayList<SeekBar>()
+
+        fun labelText(i: Int) =
+            "${eq.bandHz[i]} Hz: " + String.format(Locale.US, "%.1f", values[i] / scale)
+
+        for (i in 0 until bandCount) {
+            val label = TextView(this)
+            label.textSize = 11f
+            label.setPadding(8, 2, 8, 0)
+            label.text = labelText(i)
+            val bar = SeekBar(this)
+            bar.max = max - min
+            bar.progress = values[i] - min
+            bar.isEnabled = !setting.readOnly
+            bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                    values[i] = progress + min
+                    label.text = labelText(i)
+                }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar) {
+                    dragging[i] = true
+                }
+
+                override fun onStopTrackingTouch(seekBar: SeekBar) {
+                    dragging[i] = false
+                    values[i] = seekBar.progress + min
+                    sendValue(
+                        device,
+                        key,
+                        Value.I16VecValue(values.map { it.toShort() }),
+                        "${prettify(key)} band ${eq.bandHz[i]} Hz",
+                    )
+                }
+            })
+            labels.add(label)
+            bars.add(bar)
+            root.addView(label, matchWrap())
+            root.addView(bar, matchWrap())
+        }
+
+        val updater: (Any?) -> Unit = { s ->
+            if (s is Setting.EqualizerSetting && !dragging.any { it }) {
+                for (i in 0 until bandCount) {
+                    values[i] = s.value.getOrElse(i) { 0 }.toInt()
+                    bars[i].progress = values[i] - min
+                    labels[i].text = labelText(i)
+                }
+            }
+        }
+        return Pair(root, updater)
+    }
+
+    // Buttons for a list of options. With allowNone, an extra "-" button selects "no value".
+    private fun choiceControl(
         device: Any,
         key: String,
         options: List<String>,
         labels: List<String>,
-    ): NoiseGroup {
+        allowNone: Boolean,
+        currentOf: (Any?) -> String?,
+        makeValue: (String?) -> Value,
+    ): Pair<View, (Any?) -> Unit> {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
 
         val title = TextView(this)
         title.text = prettify(key)
-        title.textSize = 12f
+        title.textSize = 13f
         title.setPadding(8, 4, 8, 0)
         root.addView(title)
 
-        val buttons = ArrayList<NoiseButton>()
-        options.chunked(3).forEachIndexed { chunkIndex, chunk ->
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            chunk.forEachIndexed { i, option ->
-                val label = labels.getOrElse(chunkIndex * 3 + i) { option }
-                val button = makeButton(label) {}
-                row.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                buttons.add(NoiseButton(option, label, button))
+        val entries = ArrayList<Pair<String?, String>>()
+        options.forEachIndexed { i, option ->
+            val label = labels.getOrElse(i) { option }
+            entries.add(Pair(option, if (label.isBlank()) option else label))
+        }
+        if (allowNone) entries.add(Pair(null, "-"))
+
+        val choiceButtons = ArrayList<ChoiceButton>()
+        fun highlight(current: String?) {
+            choiceButtons.forEach {
+                it.button.text = (if (it.option == current) "● " else "") + it.label
             }
-            root.addView(
-                row,
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-            )
         }
 
-        val group = NoiseGroup(root, buttons)
-        buttons.forEach { nb ->
-            nb.button.setOnClickListener {
-                scope.launch {
-                    try {
-                        (device as OpenScq30Device).setSettingValues(
-                            listOf(SettingIdValuePair(key, Value.StringValue(nb.option))),
-                        )
-                        line("Set ${prettify(key)} = ${nb.label}")
-                        group.highlight(nb.option)
-                    } catch (t: Throwable) {
-                        if (t is CancellationException) throw t
-                        line("Set failed:\n" + describe(t))
+        entries.chunked(3).forEach { chunk ->
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            chunk.forEach { (option, label) ->
+                val button = makeButton(label) {
+                    if (!updatingUi) {
+                        sendValue(device, key, makeValue(option), "${prettify(key)} = $label")
+                        highlight(option)
                     }
                 }
+                row.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                choiceButtons.add(ChoiceButton(option, label, button))
+            }
+            root.addView(row, matchWrap())
+        }
+
+        val updater: (Any?) -> Unit = { s -> highlight(currentOf(s)) }
+        return Pair(root, updater)
+    }
+
+    private fun multiControl(
+        device: Any,
+        key: String,
+        setting: Setting.MultiSelectSetting,
+    ): Pair<View, (Any?) -> Unit> {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        val title = TextView(this)
+        title.text = prettify(key)
+        title.textSize = 13f
+        title.setPadding(8, 4, 8, 0)
+        root.addView(title)
+
+        val boxes = ArrayList<Pair<String, CheckBox>>()
+        val options = setting.setting.options
+        val labels = setting.setting.localizedOptions
+        options.forEachIndexed { i, option ->
+            val box = CheckBox(this)
+            box.text = labels.getOrElse(i) { option }
+            box.textSize = 12f
+            box.isChecked = option in setting.values
+            box.setOnCheckedChangeListener { _, _ ->
+                if (!updatingUi) {
+                    val selected = boxes.filter { it.second.isChecked }.map { it.first }
+                    sendValue(device, key, Value.StringVecValue(selected), "${prettify(key)} updated")
+                }
+            }
+            boxes.add(Pair(option, box))
+            root.addView(box)
+        }
+        val updater: (Any?) -> Unit = { s ->
+            if (s is Setting.MultiSelectSetting) {
+                boxes.forEach { it.second.isChecked = it.first in s.values }
             }
         }
-        return group
+        return Pair(root, updater)
     }
 
     // ---------- lifecycle ----------
@@ -950,6 +1111,7 @@ class MainActivity : Activity() {
         registerReceiver(scanReceiver, filter)
 
         showList()
+        line("Build: v4-settings")
         line("Android SDK: ${Build.VERSION.SDK_INT}")
 
         try {
