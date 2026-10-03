@@ -53,6 +53,100 @@ class MainActivity : Activity() {
         private const val REQUEST_ENABLE_BT = 1001
         private const val MAX_CONNECT_ATTEMPTS = 3
         private const val RETRY_DELAY_MS = 1500L
+
+        // Hebrew translations of setting names, categories and option labels.
+        // Keys are lower-case letters/digits only (see norm()). Anything missing is shown as it comes from the core.
+        private val translations: Map<String, String> = mapOf(
+            // categories
+            "general" to "כללי",
+            "equalizer" to "איקוולייזר",
+            "buttons" to "כפתורים",
+            "buttonconfiguration" to "הגדרת כפתורים",
+            "deviceinformation" to "מידע על המכשיר",
+            "soundmodes" to "מצבי סאונד",
+            "battery" to "סוללה",
+            "audio" to "שמע",
+            "connection" to "חיבור",
+            "information" to "מידע",
+            // sound modes
+            "ambientsoundmode" to "מצב סאונד סביבתי",
+            "noisecancelingmode" to "מצב ביטול רעשים",
+            "transparencymode" to "מצב שקיפות",
+            "manualtransparency" to "עוצמת שקיפות ידנית",
+            "windnoisesuppression" to "דיכוי רעש רוח",
+            "windnoisedetected" to "זוהה רעש רוח",
+            "transparencymodeincycle" to "שקיפות במחזור הכפתורים",
+            "noisecancelingmodeincycle" to "ביטול רעשים במחזור הכפתורים",
+            "normalmodeincycle" to "מצב רגיל במחזור הכפתורים",
+            "noisecancelingmodetype" to "סוג ביטול הרעשים",
+            "adaptivenoisecancelling" to "ביטול רעשים אדפטיבי",
+            "manualnoisecancelling" to "ביטול רעשים ידני",
+            // battery and device
+            "lowbatteryprompt" to "התראת סוללה חלשה",
+            "batterylevelleft" to "סוללה – אוזנית שמאל",
+            "batterylevelright" to "סוללה – אוזנית ימין",
+            "batterylevelcase" to "סוללה – מארז",
+            "isleftcharging" to "אוזנית שמאל נטענת",
+            "isrightcharging" to "אוזנית ימין נטענת",
+            "ischargingleft" to "אוזנית שמאל נטענת",
+            "ischargingright" to "אוזנית ימין נטענת",
+            "firmwareversion" to "גרסת קושחה",
+            "firmwareversionleft" to "גרסת קושחה – שמאל",
+            "firmwareversionright" to "גרסת קושחה – ימין",
+            "serialnumber" to "מספר סידורי",
+            "dualconnections" to "חיבור כפול",
+            // sound and misc
+            "presetequalizerprofile" to "פרופיל איקוולייזר מובנה",
+            "customequalizerprofile" to "פרופיל איקוולייזר מותאם",
+            "volumeadjustments" to "איקוולייזר",
+            "limithighvolume" to "הגבלת ווליום גבוה",
+            "spatialaudio" to "סאונד מרחבי",
+            "autopoweroff" to "כיבוי אוטומטי",
+            "touchtone" to "צליל מגע",
+            "wearingtone" to "צליל הרכבה",
+            "wearingdetection" to "זיהוי הרכבה",
+            "gamingmode" to "מצב גיימינג",
+            // options
+            "noisecanceling" to "ביטול רעשים",
+            "transparency" to "שקיפות",
+            "normal" to "רגיל",
+            "airplanemode" to "מצב טיסה",
+            "adaptive" to "אדפטיבי",
+            "manual" to "ידני",
+            "custom" to "מותאם אישית",
+            "fulltransparency" to "שקיפות מלאה",
+            "fully" to "שקיפות מלאה",
+            "vocal" to "מצב קול",
+            "vocalmode" to "מצב קול",
+            "indoor" to "בתוך הבית",
+            "outdoor" to "בחוץ",
+            "transport" to "תחבורה",
+            "off" to "כבוי",
+            "on" to "פועל",
+            // equalizer presets
+            "soundcoresignature" to "Soundcore (ברירת מחדל)",
+            "acoustic" to "אקוסטי",
+            "bassbooster" to "מגביר בס",
+            "bassreducer" to "מפחית בס",
+            "classical" to "קלאסי",
+            "podcast" to "פודקאסט",
+            "dance" to "ריקוד",
+            "deep" to "עמוק",
+            "electronic" to "אלקטרוני",
+            "flat" to "שטוח",
+            "hiphop" to "היפ הופ",
+            "jazz" to "ג'אז",
+            "latin" to "לטיני",
+            "lounge" to "לאונג'",
+            "piano" to "פסנתר",
+            "pop" to "פופ",
+            "rb" to "R&B",
+            "rock" to "רוק",
+            "smallspeakers" to "רמקולים קטנים",
+            "spokenword" to "דיבור",
+            "treblebooster" to "מגביר גבוהים",
+            "treblereducer" to "מפחית גבוהים",
+        )
     }
 
     private enum class Screen { LIST, PICKER, CONNECTED }
@@ -131,6 +225,24 @@ class MainActivity : Activity() {
         model
     }
 
+    // ---------- Hebrew helpers ----------
+
+    private fun norm(text: String): String = text.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
+
+    private fun prettify(key: String): String =
+        key.replace(Regex("([a-z])([A-Z])"), "$1 $2").replaceFirstChar { it.uppercase(Locale.US) }
+
+    // Name of a setting or a category, in Hebrew when known.
+    private fun settingName(key: String): String = translations[norm(key)] ?: prettify(key)
+
+    // Label of an option (a button), in Hebrew when known.
+    private fun optionText(option: String, localized: String): String =
+        translations[norm(option)] ?: translations[norm(localized)] ?: localized.ifBlank { option }
+
+    private fun rtl(view: View) {
+        view.layoutDirection = View.LAYOUT_DIRECTION_RTL
+    }
+
     private val scanReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -140,7 +252,7 @@ class MainActivity : Activity() {
                     val name = intent.getStringExtra(BluetoothDevice.EXTRA_NAME) ?: found.name ?: ""
                     val isNew = !discovered.containsKey(mac)
                     if (isNew || name.isNotEmpty()) discovered[mac] = name
-                    if (isNew && isAnker(mac)) line("Found: ${name.ifEmpty { "Unknown" }} ($mac)")
+                    if (isNew && isAnker(mac)) line("נמצא: ${name.ifEmpty { "לא ידוע" }} ($mac)")
                     if (currentScreen == Screen.LIST) rebuildRows()
                 }
                 BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
@@ -154,7 +266,7 @@ class MainActivity : Activity() {
                     }
                     if (state == BluetoothDevice.BOND_BONDED) {
                         pendingPairMac = null
-                        line("Paired: ${changed.name ?: ""} ($mac)")
+                        line("זווג: ${changed.name ?: ""} ($mac)")
                         discovered.remove(mac)
                         scope.launch {
                             try {
@@ -164,15 +276,15 @@ class MainActivity : Activity() {
                                 if (row != null) onDeviceChosen(row)
                             } catch (t: Throwable) {
                                 if (t is CancellationException) throw t
-                                line("List failed:\n" + describe(t))
+                                line("טעינת הרשימה נכשלה:\n" + describe(t))
                             }
                         }
                     } else if (state == BluetoothDevice.BOND_NONE && previous == BluetoothDevice.BOND_BONDING) {
                         pendingPairMac = null
-                        line("Pairing failed. Put the earbuds in pairing mode and try again.")
+                        line("הזיווג נכשל. הכנס את האוזניות למצב זיווג ונסה שוב.")
                     }
                 }
-                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> line("Scan finished")
+                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> line("הסריקה הסתיימה")
             }
         }
     }
@@ -252,7 +364,7 @@ class MainActivity : Activity() {
     private fun ensureBluetoothEnabled(onReady: () -> Unit) {
         val adapter = BluetoothAdapter.getDefaultAdapter()
         if (adapter == null) {
-            line("Bluetooth is not supported on this device")
+            line("המכשיר הזה לא תומך ב-Bluetooth")
             return
         }
         if (adapter.isEnabled) {
@@ -260,12 +372,12 @@ class MainActivity : Activity() {
             return
         }
         pendingAfterEnable = onReady
-        line("Bluetooth is off - asking to enable...")
+        line("Bluetooth כבוי – מבקש להפעיל...")
         try {
             startActivityForResult(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQUEST_ENABLE_BT)
         } catch (t: Throwable) {
             pendingAfterEnable = null
-            line("Could not ask to enable Bluetooth: ${t.message}")
+            line("לא הצלחתי לבקש הפעלת Bluetooth: ${t.message}")
         }
     }
 
@@ -275,10 +387,10 @@ class MainActivity : Activity() {
             val next = pendingAfterEnable
             pendingAfterEnable = null
             if (resultCode == RESULT_OK) {
-                line("Bluetooth enabled")
+                line("Bluetooth הופעל")
                 next?.invoke()
             } else {
-                line("Bluetooth was not enabled")
+                line("Bluetooth לא הופעל")
             }
         }
     }
@@ -290,17 +402,17 @@ class MainActivity : Activity() {
         connectionView = null
         settingsContainer = null
 
-        val showAllButton = makeButton(if (showAll) "All: on" else "All: off") {}
+        val showAllButton = makeButton(if (showAll) "הכל: פעיל" else "הכל: כבוי") {}
         showAllButton.setOnClickListener {
             showAll = !showAll
-            showAllButton.text = if (showAll) "All: on" else "All: off"
+            showAllButton.text = if (showAll) "הכל: פעיל" else "הכל: כבוי"
             refreshDeviceList()
         }
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
         val weight = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }
-        buttons.addView(makeButton("Scan") { startScan() }, weight())
-        buttons.addView(makeButton("Refresh") { refreshDeviceList() }, weight())
+        buttons.addView(makeButton("סרוק") { startScan() }, weight())
+        buttons.addView(makeButton("רענן") { refreshDeviceList() }, weight())
         buttons.addView(showAllButton, weight())
 
         val list = ListView(this)
@@ -320,6 +432,7 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        rtl(root)
         root.addView(buttons, matchWrap())
         root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(status, matchWrap())
@@ -331,11 +444,11 @@ class MainActivity : Activity() {
     }
 
     private fun rowText(row: Row): String {
-        val name = row.name.ifEmpty { "Unknown" }
+        val name = row.name.ifEmpty { "לא ידוע" }
         val modelLine = when {
-            !row.bonded -> "(nearby - tap to pair)"
-            row.model != null -> "-> ${modelName(row.model)}"
-            else -> "(tap to choose model)"
+            !row.bonded -> "(בקרבת מקום – לחץ לזיווג)"
+            row.model != null -> "דגם: ${modelName(row.model)}"
+            else -> "(לחץ לבחירת דגם)"
         }
         return "$name\n${row.mac}\n$modelLine"
     }
@@ -376,11 +489,11 @@ class MainActivity : Activity() {
                 bondedRows = allRows()
                 rebuildRows()
                 if (deviceRows.isEmpty()) {
-                    line("No Anker devices found (${bondedRows.size} paired in total). Press Scan, or All: on.")
+                    line("לא נמצאו מכשירי Anker (${bondedRows.size} מכשירים מזווגים בסך הכל). לחץ על סרוק, או הפעל 'הכל'.")
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                line("List failed:\n" + describe(t))
+                line("טעינת הרשימה נכשלה:\n" + describe(t))
             }
         }
     }
@@ -404,14 +517,14 @@ class MainActivity : Activity() {
                     if (adapter.isDiscovering) adapter.cancelDiscovery()
                     val device = adapter.getRemoteDevice(row.mac)
                     pendingPairMac = row.mac.uppercase(Locale.US)
-                    line("Pairing with ${row.name.ifEmpty { "Unknown" }}... confirm on the phone if asked")
+                    line("מזווג עם ${row.name.ifEmpty { "לא ידוע" }}... אשר בטלפון אם מתבקש")
                     if (!device.createBond()) {
                         pendingPairMac = null
-                        line("Pairing could not start")
+                        line("לא ניתן להתחיל זיווג")
                     }
                 } catch (t: Throwable) {
                     pendingPairMac = null
-                    line("Pairing failed:\n" + describe(t))
+                    line("הזיווג נכשל:\n" + describe(t))
                 }
             }
         }
@@ -419,9 +532,9 @@ class MainActivity : Activity() {
 
     private fun showDeviceMenu(row: Row) {
         val items: Array<CharSequence> = if (row.model != null) {
-            arrayOf("Change model", "Forget model (unpair)")
+            arrayOf("שנה דגם", "בטל שיוך דגם")
         } else {
-            arrayOf("Choose model")
+            arrayOf("בחר דגם")
         }
         AlertDialog.Builder(this)
             .setTitle(row.name)
@@ -436,11 +549,11 @@ class MainActivity : Activity() {
                             if (row.mac.equals(prefs.getString("last_mac", null), ignoreCase = true)) {
                                 prefs.edit().remove("last_mac").apply()
                             }
-                            line("Unpaired ${row.name}")
+                            line("שיוך הדגם בוטל: ${row.name}")
                             refreshDeviceList()
                         } catch (t: Throwable) {
                             if (t is CancellationException) throw t
-                            line("Unpair failed:\n" + describe(t))
+                            line("ביטול השיוך נכשל:\n" + describe(t))
                         }
                     }
                 }
@@ -468,7 +581,7 @@ class MainActivity : Activity() {
                 .map { Pair(it, modelName(it)) }
                 .sortedBy { it.second }
         } catch (t: Throwable) {
-            line("Could not load model list:\n" + describe(t))
+            line("טעינת רשימת הדגמים נכשלה:\n" + describe(t))
             showList()
             return
         }
@@ -476,10 +589,10 @@ class MainActivity : Activity() {
         val title = TextView(this)
         title.textSize = 14f
         title.setPadding(8, 8, 8, 8)
-        title.text = "Select the model of ${row.name}"
+        title.text = "בחר את הדגם של ${row.name}"
 
         val search = EditText(this)
-        search.hint = "Search model"
+        search.hint = "חפש דגם"
         search.setSingleLine(true)
 
         val list = ListView(this)
@@ -511,6 +624,7 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        rtl(root)
         root.addView(title, matchWrap())
         root.addView(search, matchWrap())
         root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -524,12 +638,12 @@ class MainActivity : Activity() {
             try {
                 activeSession.pair(PairedDevice(macAddress = row.mac, model = modelId, isDemo = false))
                 learnPrefix(row.mac)
-                line("Assigned ${modelName(modelId)} to ${row.name}")
+                line("שויך הדגם ${modelName(modelId)} ל-${row.name}")
                 startConnection(row.mac)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                line("Assign failed:\n" + describe(t))
-                toast("Assign failed")
+                line("שיוך הדגם נכשל:\n" + describe(t))
+                toast("שיוך הדגם נכשל")
                 showList()
             }
         }
@@ -544,12 +658,12 @@ class MainActivity : Activity() {
     private fun beginScan() {
         val adapter = BluetoothAdapter.getDefaultAdapter()
         if (adapter == null || !adapter.isEnabled) {
-            line("Bluetooth is off or unavailable")
+            line("Bluetooth כבוי או לא זמין")
             return
         }
         discovered.clear()
         if (currentScreen == Screen.LIST) rebuildRows()
-        line("Scanning for nearby Anker devices... new earbuds must be in pairing mode")
+        line("סורק מכשירי Anker בסביבה... אוזניות חדשות חייבות להיות במצב זיווג")
         if (adapter.isDiscovering) adapter.cancelDiscovery()
         adapter.startDiscovery()
     }
@@ -567,15 +681,15 @@ class MainActivity : Activity() {
                 val target = assigned.firstOrNull { it.mac.equals(last, ignoreCase = true) }
                     ?: assigned.singleOrNull()
                 if (target == null) {
-                    line("Auto-connect: no device with an assigned model yet")
+                    line("חיבור אוטומטי: עדיין אין מכשיר ששויך לו דגם")
                     beginScan()
                     return@launch
                 }
-                line("Auto-connecting to ${target.name}...")
+                line("מתחבר אוטומטית ל-${target.name}...")
                 startConnection(target.mac)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                line("Auto-connect failed:\n" + describe(t))
+                line("החיבור האוטומטי נכשל:\n" + describe(t))
             }
         }
     }
@@ -611,16 +725,17 @@ class MainActivity : Activity() {
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
         buttons.addView(
-            makeButton("Back") { onBackPressed() },
+            makeButton("חזרה") { onBackPressed() },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         buttons.addView(
-            makeButton("Reconnect") { startConnection(currentMac) },
+            makeButton("התחבר מחדש") { startConnection(currentMac) },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        rtl(root)
         root.addView(buttons, matchWrap())
         root.addView(scrollView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
@@ -631,7 +746,7 @@ class MainActivity : Activity() {
 
     private fun startConnection(mac: String) {
         if (session == null || !nativeReady) {
-            line("Not ready yet")
+            line("עדיין לא מוכן")
             return
         }
         ensureBluetoothEnabled { connectNow(mac) }
@@ -647,7 +762,7 @@ class MainActivity : Activity() {
         job?.cancel()
         if (wasActive) {
             releaseDevice(device, currentMac)
-            line("Disconnected from $currentMac ($reason)")
+            line("התנתק מ-$currentMac ($reason)")
         }
         return wasActive
     }
@@ -675,13 +790,13 @@ class MainActivity : Activity() {
     private fun connectNow(mac: String) {
         val activeSession = session
         if (activeSession == null || !nativeReady) {
-            line("Not ready yet")
+            line("עדיין לא מוכן")
             return
         }
-        disconnect("new connection")
+        disconnect("חיבור חדש")
         statusLines.clear()
         showConnectedScreen(mac)
-        line("--- connecting to $mac ---")
+        line("--- מתחבר אל $mac ---")
         connectionJob = scope.launch {
             try {
                 // Let any previous socket finish closing, and make sure no Bluetooth scan is running.
@@ -694,18 +809,18 @@ class MainActivity : Activity() {
                 val backends = connectionBackends(applicationContext, scope)
                 val connected = connectWithRetry(activeSession, backends, mac)
                 if (connected == null) {
-                    line("Giving up after $MAX_CONNECT_ATTEMPTS attempts. Press Reconnect to try again.")
+                    line("ויתרתי אחרי $MAX_CONNECT_ATTEMPTS ניסיונות. לחץ על 'התחבר מחדש' כדי לנסות שוב.")
                     return@launch
                 }
 
                 activeDevice = connected
                 prefs.edit().putString("last_mac", mac).apply()
-                line("CONNECTED, model=${modelName(connected.model())}")
+                line("מחובר, דגם: ${modelName(connected.model())}")
 
                 // Re-read all settings every few seconds (only while the app is on screen).
                 while (isActive) {
                     if (!ActiveSockets.isConnected(mac)) {
-                        line("Connection lost - disconnected from $mac")
+                        line("החיבור אבד – התנתק מ-$mac")
                         if (activeDevice === connected) activeDevice = null
                         releaseDevice(connected, mac)
                         break
@@ -724,14 +839,14 @@ class MainActivity : Activity() {
                         val text = describe(t)
                         if (text != lastRefreshError) {
                             lastRefreshError = text
-                            line("Refresh failed:\n$text")
+                            line("הרענון נכשל:\n$text")
                         }
                     }
                     delay(refreshIntervalMs)
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                line("FAIL:\n" + describe(t))
+                line("שגיאה:\n" + describe(t))
             }
         }
     }
@@ -746,7 +861,7 @@ class MainActivity : Activity() {
         var result = tryConnectOnce(activeSession, backends, mac, 1)
         var attempt = 1
         while (result == null && attempt < MAX_CONNECT_ATTEMPTS) {
-            line("Retrying (attempt ${attempt + 1}/$MAX_CONNECT_ATTEMPTS)...")
+            line("מנסה שוב (ניסיון ${attempt + 1} מתוך $MAX_CONNECT_ATTEMPTS)...")
             delay(RETRY_DELAY_MS)
             attempt += 1
             result = tryConnectOnce(activeSession, backends, mac, attempt)
@@ -763,7 +878,7 @@ class MainActivity : Activity() {
         activeSession.connectWithBackends(backends, mac)
     } catch (t: Throwable) {
         if (t is CancellationException) throw t
-        line("Connect failed (attempt $attempt/$MAX_CONNECT_ATTEMPTS):\n" + describe(t))
+        line("החיבור נכשל (ניסיון $attempt מתוך $MAX_CONNECT_ATTEMPTS):\n" + describe(t))
         try {
             ActiveSockets.close(mac)
         } catch (_: Throwable) {
@@ -775,17 +890,14 @@ class MainActivity : Activity() {
     // Every setting returned by the core gets a control matching its type. Changing a control sends the new
     // value with device.setSettingValues(listOf(SettingIdValuePair(id, value))).
 
-    private fun prettify(key: String): String =
-        key.replace(Regex("([a-z])([A-Z])"), "$1 $2").replaceFirstChar { it.uppercase(Locale.US) }
-
     private fun sendValue(device: Any, key: String, value: Value, description: String) {
         scope.launch {
             try {
                 (device as OpenScq30Device).setSettingValues(listOf(SettingIdValuePair(key, value)))
-                line("Set $description")
+                line("נשלח: $description")
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                line("Set failed:\n" + describe(t))
+                line("השליחה נכשלה:\n" + describe(t))
             }
         }
     }
@@ -798,7 +910,7 @@ class MainActivity : Activity() {
             if (updater == null) {
                 val built = buildControl(device, item.key, setting)
                 if (built == null) {
-                    if (loggedSkips.add(item.key)) line("(skipped ${item.key}: ${setting.javaClass.simpleName})")
+                    if (loggedSkips.add(item.key)) line("(דילגתי על ${item.key}: ${setting.javaClass.simpleName})")
                     continue
                 }
                 var section = sections[item.category]
@@ -806,7 +918,7 @@ class MainActivity : Activity() {
                     section = LinearLayout(this)
                     section.orientation = LinearLayout.VERTICAL
                     val header = TextView(this)
-                    header.text = prettify(item.category)
+                    header.text = settingName(item.category)
                     header.textSize = 14f
                     header.setPadding(8, 16, 8, 4)
                     section.addView(header)
@@ -848,7 +960,7 @@ class MainActivity : Activity() {
             )
             is Setting.ModifiableSelectSetting ->
                 if (setting.setting.options.isEmpty()) {
-                    infoControl(key, "(empty)") { "(empty)" }
+                    infoControl(key, "(ריק)") { "(ריק)" }
                 } else {
                     choiceControl(
                         device, key, setting.setting.options, setting.setting.localizedOptions, true,
@@ -858,7 +970,7 @@ class MainActivity : Activity() {
                 }
             is Setting.MultiSelectSetting ->
                 if (setting.setting.options.isEmpty()) {
-                    infoControl(key, "(empty)") { "(empty)" }
+                    infoControl(key, "(ריק)") { "(ריק)" }
                 } else {
                     multiControl(device, key, setting)
                 }
@@ -873,17 +985,24 @@ class MainActivity : Activity() {
         val view = TextView(this)
         view.textSize = 13f
         view.setPadding(8, 4, 8, 4)
-        view.text = "${prettify(key)}: $initial"
-        return Pair(view, { s -> view.text = "${prettify(key)}: ${textOf(s)}" })
+        view.text = "${settingName(key)}: $initial"
+        return Pair(view, { s -> view.text = "${settingName(key)}: ${textOf(s)}" })
     }
 
     private fun toggleControl(device: Any, key: String, setting: Setting.ToggleSetting): Pair<View, (Any?) -> Unit> {
         val box = CheckBox(this)
-        box.text = prettify(key)
+        box.text = settingName(key)
         box.textSize = 13f
         box.isChecked = setting.value
         box.setOnCheckedChangeListener { _, checked ->
-            if (!updatingUi) sendValue(device, key, Value.BoolValue(checked), "${prettify(key)} = $checked")
+            if (!updatingUi) {
+                sendValue(
+                    device,
+                    key,
+                    Value.BoolValue(checked),
+                    "${settingName(key)} = ${if (checked) "פועל" else "כבוי"}",
+                )
+            }
         }
         val updater: (Any?) -> Unit = { s ->
             if (s is Setting.ToggleSetting) box.isChecked = s.value
@@ -903,13 +1022,14 @@ class MainActivity : Activity() {
         label.textSize = 13f
         label.setPadding(8, 4, 8, 0)
         val bar = SeekBar(this)
+        bar.layoutDirection = View.LAYOUT_DIRECTION_LTR
         bar.max = max
         bar.progress = (setting.value - start) / step
-        label.text = "${prettify(key)}: ${setting.value}"
+        label.text = "${settingName(key)}: ${setting.value}"
         var dragging = false
         bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                label.text = "${prettify(key)}: ${start + progress * step}"
+                label.text = "${settingName(key)}: ${start + progress * step}"
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar) {
@@ -919,7 +1039,7 @@ class MainActivity : Activity() {
             override fun onStopTrackingTouch(seekBar: SeekBar) {
                 dragging = false
                 val value = start + seekBar.progress * step
-                sendValue(device, key, Value.I32Value(value), "${prettify(key)} = $value")
+                sendValue(device, key, Value.I32Value(value), "${settingName(key)} = $value")
             }
         })
         root.addView(label, matchWrap())
@@ -927,7 +1047,7 @@ class MainActivity : Activity() {
         val updater: (Any?) -> Unit = { s ->
             if (s is Setting.I32RangeSetting && !dragging) {
                 bar.progress = (s.value - start) / step
-                label.text = "${prettify(key)}: ${s.value}"
+                label.text = "${settingName(key)}: ${s.value}"
             }
         }
         return Pair(root, updater)
@@ -949,7 +1069,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         val title = TextView(this)
-        title.text = prettify(key)
+        title.text = settingName(key)
         title.textSize = 13f
         title.setPadding(8, 4, 8, 0)
         root.addView(title)
@@ -966,6 +1086,7 @@ class MainActivity : Activity() {
             label.setPadding(8, 2, 8, 0)
             label.text = labelText(i)
             val bar = SeekBar(this)
+            bar.layoutDirection = View.LAYOUT_DIRECTION_LTR
             bar.max = max - min
             bar.progress = values[i] - min
             bar.isEnabled = !setting.readOnly
@@ -986,7 +1107,7 @@ class MainActivity : Activity() {
                         device,
                         key,
                         Value.I16VecValue(values.map { it.toShort() }),
-                        "${prettify(key)} band ${eq.bandHz[i]} Hz",
+                        "${settingName(key)} – ${eq.bandHz[i]} Hz",
                     )
                 }
             })
@@ -1022,15 +1143,14 @@ class MainActivity : Activity() {
         root.orientation = LinearLayout.VERTICAL
 
         val title = TextView(this)
-        title.text = prettify(key)
+        title.text = settingName(key)
         title.textSize = 13f
         title.setPadding(8, 4, 8, 0)
         root.addView(title)
 
         val entries = ArrayList<Pair<String?, String>>()
         options.forEachIndexed { i, option ->
-            val label = labels.getOrElse(i) { option }
-            entries.add(Pair(option, if (label.isBlank()) option else label))
+            entries.add(Pair(option, optionText(option, labels.getOrElse(i) { option })))
         }
         if (allowNone) entries.add(Pair(null, "-"))
 
@@ -1047,7 +1167,7 @@ class MainActivity : Activity() {
             chunk.forEach { (option, label) ->
                 val button = makeButton(label) {
                     if (!updatingUi) {
-                        sendValue(device, key, makeValue(option), "${prettify(key)} = $label")
+                        sendValue(device, key, makeValue(option), "${settingName(key)} = $label")
                         highlight(option)
                     }
                 }
@@ -1069,7 +1189,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         val title = TextView(this)
-        title.text = prettify(key)
+        title.text = settingName(key)
         title.textSize = 13f
         title.setPadding(8, 4, 8, 0)
         root.addView(title)
@@ -1079,13 +1199,13 @@ class MainActivity : Activity() {
         val labels = setting.setting.localizedOptions
         options.forEachIndexed { i, option ->
             val box = CheckBox(this)
-            box.text = labels.getOrElse(i) { option }
+            box.text = optionText(option, labels.getOrElse(i) { option })
             box.textSize = 12f
             box.isChecked = option in setting.values
             box.setOnCheckedChangeListener { _, _ ->
                 if (!updatingUi) {
                     val selected = boxes.filter { it.second.isChecked }.map { it.first }
-                    sendValue(device, key, Value.StringVecValue(selected), "${prettify(key)} updated")
+                    sendValue(device, key, Value.StringVecValue(selected), "${settingName(key)} עודכן")
                 }
             }
             boxes.add(Pair(option, box))
@@ -1111,8 +1231,8 @@ class MainActivity : Activity() {
         registerReceiver(scanReceiver, filter)
 
         showList()
-        line("Build: v4-settings")
-        line("Android SDK: ${Build.VERSION.SDK_INT}")
+        line("גרסה: v5-עברית")
+        line("גרסת אנדרואיד (SDK): ${Build.VERSION.SDK_INT}")
 
         try {
             System.loadLibrary("openscq30_android")
@@ -1120,21 +1240,21 @@ class MainActivity : Activity() {
             initNativeLogging()
             initNativeI18n(listOf(LanguageIdentifier("en", null, null, emptyList())))
             nativeReady = true
-            line("OK: native + bindings + i18n")
+            line("תקין: ספריית הליבה נטענה")
         } catch (t: Throwable) {
-            line("FAIL init:\n" + describe(t))
+            line("טעינת הליבה נכשלה:\n" + describe(t))
             return
         }
 
         scope.launch {
             try {
                 session = newSession(File(filesDir, "openscq30.db").absolutePath)
-                line("Session OK")
+                line("החיבור למסד הנתונים תקין")
                 refreshDeviceList()
                 ensureBluetoothEnabled { autoConnect() }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                line("Session failed:\n" + describe(t))
+                line("פתיחת מסד הנתונים נכשלה:\n" + describe(t))
             }
         }
     }
@@ -1148,7 +1268,7 @@ class MainActivity : Activity() {
             val wasActive = (job != null && job.isActive) || activeDevice != null
             if (wasActive) {
                 resumeMac = currentMac
-                disconnect("left app")
+                disconnect("יציאה מהאפליקציה")
             }
         }
     }
@@ -1167,7 +1287,7 @@ class MainActivity : Activity() {
             Screen.CONNECTED -> {
                 autoConnectDone = true
                 resumeMac = null
-                disconnect("back")
+                disconnect("חזרה")
                 showList()
             }
             Screen.PICKER -> showList()
@@ -1184,9 +1304,8 @@ class MainActivity : Activity() {
             BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
         } catch (_: Throwable) {
         }
-        disconnect("app closed")
+        disconnect("סגירת האפליקציה")
         scope.cancel()
         super.onDestroy()
     }
 }
- 
