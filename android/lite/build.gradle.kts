@@ -17,8 +17,10 @@ android {
         applicationId = "com.oppzippy.openscq30.lite"
         minSdk = 19
         targetSdk = 19
-        versionCode = 1
-        versionName = "0.1"
+        // On GitHub Actions the build number grows with every run, so each APK has a higher version.
+        val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = buildNumber
+        versionName = "0.1.$buildNumber"
         multiDexEnabled = true // NEW
     }
 
