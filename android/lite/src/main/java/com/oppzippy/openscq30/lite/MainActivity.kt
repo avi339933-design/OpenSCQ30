@@ -10,6 +10,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -53,6 +55,7 @@ class MainActivity : Activity() {
         private const val REQUEST_ENABLE_BT = 1001
         private const val MAX_CONNECT_ATTEMPTS = 3
         private const val RETRY_DELAY_MS = 1500L
+        private const val KEY_SEND_DELAY_MS = 700L
     }
  
     private enum class Screen { LIST, PICKER, CONNECTED }
@@ -66,6 +69,7 @@ class MainActivity : Activity() {
  
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs by lazy { getSharedPreferences("lite", MODE_PRIVATE) }
+    private val uiHandler = Handler(Looper.getMainLooper())
  
     private var session: OpenScq30Session? = null
     private var nativeReady = false
@@ -338,6 +342,12 @@ class MainActivity : Activity() {
         buttons.addView(makeButton("סרוק") { startScan() }, weight())
         buttons.addView(makeButton("רענן") { refreshDeviceList() }, weight())
         buttons.addView(showAllButton, weight())
+        buttons.addView(
+            makeButton("עדכון") {
+                UpdateManager.showUpdateDialog(this, { disconnect("עדכון") }, { line(it) })
+            },
+            weight(),
+        )
  
         val list = ListView(this)
         listView = list
@@ -936,6 +946,8 @@ class MainActivity : Activity() {
         return Pair(box, updater)
     }
  
+    // Sliders: with touch the value is sent when the finger is lifted. With a keypad there is no "lifted" event,
+    // so the value is sent shortly after the last key press.
     private fun rangeControl(device: Any, key: String, setting: Setting.I32RangeSetting): Pair<View, (Any?) -> Unit> {
         val range = setting.setting
         val start = range.start
@@ -953,9 +965,20 @@ class MainActivity : Activity() {
         bar.progress = (setting.value - start) / step
         label.text = "${settingName(key)}: ${setting.value}"
         var dragging = false
+        var pendingSend: Runnable? = null
+        val sendNow = Runnable {
+            pendingSend = null
+            val value = start + bar.progress * step
+            sendValue(device, key, Value.I32Value(value), "${settingName(key)} = $value")
+        }
         bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 label.text = "${settingName(key)}: ${start + progress * step}"
+                if (fromUser && !dragging) {
+                    pendingSend?.let { uiHandler.removeCallbacks(it) }
+                    pendingSend = sendNow
+                    uiHandler.postDelayed(sendNow, KEY_SEND_DELAY_MS)
+                }
             }
  
             override fun onStartTrackingTouch(seekBar: SeekBar) {
@@ -964,6 +987,8 @@ class MainActivity : Activity() {
  
             override fun onStopTrackingTouch(seekBar: SeekBar) {
                 dragging = false
+                pendingSend?.let { uiHandler.removeCallbacks(it) }
+                pendingSend = null
                 val value = start + seekBar.progress * step
                 sendValue(device, key, Value.I32Value(value), "${settingName(key)} = $value")
             }
@@ -971,7 +996,7 @@ class MainActivity : Activity() {
         root.addView(label, matchWrap())
         root.addView(bar, matchWrap())
         val updater: (Any?) -> Unit = { s ->
-            if (s is Setting.I32RangeSetting && !dragging) {
+            if (s is Setting.I32RangeSetting && !dragging && pendingSend == null) {
                 bar.progress = (s.value - start) / step
                 label.text = "${settingName(key)}: ${s.value}"
             }
@@ -991,6 +1016,16 @@ class MainActivity : Activity() {
         val scale = Math.pow(10.0, eq.fractionDigits.toDouble())
         val values = IntArray(bandCount) { setting.value.getOrElse(it) { 0 }.toInt() }
         val dragging = BooleanArray(bandCount)
+        var pendingSend: Runnable? = null
+        val sendNow = Runnable {
+            pendingSend = null
+            sendValue(
+                device,
+                key,
+                Value.I16VecValue(values.map { it.toShort() }),
+                settingName(key),
+            )
+        }
  
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
@@ -1020,6 +1055,11 @@ class MainActivity : Activity() {
                 override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                     values[i] = progress + min
                     label.text = labelText(i)
+                    if (fromUser && !dragging[i]) {
+                        pendingSend?.let { uiHandler.removeCallbacks(it) }
+                        pendingSend = sendNow
+                        uiHandler.postDelayed(sendNow, KEY_SEND_DELAY_MS)
+                    }
                 }
  
                 override fun onStartTrackingTouch(seekBar: SeekBar) {
@@ -1028,6 +1068,8 @@ class MainActivity : Activity() {
  
                 override fun onStopTrackingTouch(seekBar: SeekBar) {
                     dragging[i] = false
+                    pendingSend?.let { uiHandler.removeCallbacks(it) }
+                    pendingSend = null
                     values[i] = seekBar.progress + min
                     sendValue(
                         device,
@@ -1044,7 +1086,7 @@ class MainActivity : Activity() {
         }
  
         val updater: (Any?) -> Unit = { s ->
-            if (s is Setting.EqualizerSetting && !dragging.any { it }) {
+            if (s is Setting.EqualizerSetting && !dragging.any { it } && pendingSend == null) {
                 for (i in 0 until bandCount) {
                     values[i] = s.value.getOrElse(i) { 0 }.toInt()
                     bars[i].progress = values[i] - min
@@ -1157,7 +1199,7 @@ class MainActivity : Activity() {
         registerReceiver(scanReceiver, filter)
  
         showList()
-        line("גרסה: v6-עברית")
+        line("גרסה: v7-עדכון")
         line("גרסת אנדרואיד (SDK): ${Build.VERSION.SDK_INT}")
  
         try {
@@ -1230,8 +1272,10 @@ class MainActivity : Activity() {
             BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
         } catch (_: Throwable) {
         }
+        uiHandler.removeCallbacksAndMessages(null)
         disconnect("סגירת האפליקציה")
         scope.cancel()
         super.onDestroy()
     }
 }
+ 
