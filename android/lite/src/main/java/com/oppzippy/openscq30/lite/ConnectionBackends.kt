@@ -19,6 +19,8 @@ import com.oppzippy.openscq30.lib.bindings.RfcommServiceSelectionStrategy
 import com.oppzippy.openscq30.lib.wrapper.ConnectionDescriptor
 import com.oppzippy.openscq30.lib.wrapper.ConnectionStatus
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
@@ -52,6 +54,39 @@ object ActiveSockets {
             socket.close()
         } catch (_: IOException) {
         }
+    }
+}
+
+/**
+ * Remembers the last Bluetooth packets that were received (RX) from or sent (TX) to the earbuds, so we can see
+ * what they really send. Only the first bytes of each packet are kept, which keeps serial numbers out of it.
+ */
+object PacketLog {
+    private const val MAX_ENTRIES = 60
+    private const val MAX_SHOWN_BYTES = 24
+
+    private val entries = ArrayList<String>()
+    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
+
+    @Synchronized
+    fun add(direction: String, data: ByteArray, length: Int) {
+        val shown = minOf(length, MAX_SHOWN_BYTES)
+        val hex = StringBuilder()
+        for (i in 0 until shown) {
+            if (i > 0) hex.append(' ')
+            hex.append(String.format(Locale.US, "%02X", data[i].toInt() and 0xFF))
+        }
+        if (length > shown) hex.append(" ...")
+        entries.add(timeFormat.format(Date()) + " " + direction + " (" + length + ") " + hex)
+        while (entries.size > MAX_ENTRIES) entries.removeAt(0)
+    }
+
+    @Synchronized
+    fun snapshot(): List<String> = ArrayList(entries)
+
+    @Synchronized
+    fun clear() {
+        entries.clear()
     }
 }
 
@@ -224,7 +259,10 @@ class AndroidRfcommConnectionBackendImpl(private val context: Context, private v
 
                             0 -> Unit
 
-                            else -> manualRfcommConnection.addInboundPacket(buffer.sliceArray(0..<size))
+                            else -> {
+                                PacketLog.add("RX", buffer, size)
+                                manualRfcommConnection.addInboundPacket(buffer.sliceArray(0..<size))
+                            }
                         }
                     } catch (ex: IOException) {
                         Log.d(TAG, "disconnected", ex)
@@ -256,6 +294,7 @@ class AndroidRfcommConnectionWriterImpl(
     override suspend fun write(data: ByteArray) {
         withContext(Dispatchers.IO) {
             try {
+                PacketLog.add("TX", data, data.size)
                 socket.outputStream.write(data)
             } catch (ex: IOException) {
                 Log.d(TAG, "disconnected", ex)
