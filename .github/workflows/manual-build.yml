@@ -1,7 +1,12 @@
 name: Manual APK Build
 on:
   workflow_dispatch:
-
+    inputs:
+      force_rust:
+        description: "Rebuild the Rust core even if no Rust file changed"
+        type: boolean
+        default: false
+ 
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -26,6 +31,27 @@ jobs:
       - run: sdkmanager "ndk;25.2.9519653"
       - run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
       - run: echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+ 
+      # The compiled Rust core (the .so file) and the Kotlin bindings generated from it only change when a Rust
+      # file changes. They are saved in a cache under a key made from those files. When the key is found (for
+      # example after a change in a Kotlin file only), the Rust build is skipped.
+      - name: Restore the compiled Rust core
+        id: rustout
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/armv7-linux-androideabi/debug/libopenscq30_android.so
+            android/lite/build/generated/source/uniffi
+          key: rust-core-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'lib/**', 'android/build.rs', '**/*.rs', '**/Cargo.toml', '**/*.ftl', '**/*.c', '!target/**', '!android/lite/**', '!android/app/**', '!gui/**') }}
+      - name: Decide whether to skip the Rust build
+        run: |
+          if [ "${{ steps.rustout.outputs.cache-hit }}" = "true" ] && [ "${{ inputs.force_rust }}" != "true" ]; then
+            echo "SKIP_RUST=true" >> $GITHUB_ENV
+            echo "Rust core restored from cache - skipping the Rust build"
+          else
+            echo "Building the Rust core"
+          fi
+ 
       - uses: gradle/actions/setup-gradle@v4
       - run: cd android && chmod +x gradlew && ./gradlew :lite:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
@@ -33,3 +59,4 @@ jobs:
         with:
           name: apk-output
           path: android/lite/build/outputs/apk/**/*.apk
+ 
