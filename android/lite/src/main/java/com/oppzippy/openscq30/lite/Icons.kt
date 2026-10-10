@@ -127,45 +127,78 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
     }
 }
 
-// A simple picture of two earbuds on a pale circle (our own drawing, not the official image).
+// A simple picture of the charging case in the middle, the left earbud on its left and the right earbud on its
+// right, tilted outwards, on a pale circle (our own drawing, not the official image). The sides are the sides
+// as seen on the screen, so "right" is the right earbud.
 class EarbudsView(context: Context, private val soft: Int, private val accent: Int) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
+    private val caseBase = 0xFF8DB4E6.toInt()
+    private val caseLid = 0xFFB4D0F2.toInt()
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val r = min(w, h) / 2f
-        val stroke = resources.displayMetrics.density * 1.5f
+        // The drawing is a bit wider than tall, so the scale follows the smaller of the two limits.
+        val s = min(h, w / 1.3f)
+        canvas.save()
+        canvas.translate(w / 2f, h / 2f)
+
         paint.style = Paint.Style.FILL
         paint.color = soft
-        canvas.drawCircle(w / 2f, h / 2f, r, paint)
-        for (side in intArrayOf(-1, 1)) {
-            canvas.save()
-            canvas.translate(w / 2f + side * r * 0.36f, h / 2f)
-            canvas.rotate(side * 16f)
-            drawBud(canvas, r, stroke)
-            canvas.restore()
-        }
+        canvas.drawCircle(0f, 0f, s / 2f, paint)
+
+        drawCase(canvas, s)
+        drawBud(canvas, s, -1)
+        drawBud(canvas, s, 1)
+        canvas.restore()
     }
 
-    private fun drawBud(canvas: Canvas, r: Float, stroke: Float) {
-        rect.set(-r * 0.09f, -r * 0.1f, r * 0.09f, r * 0.55f)
+    private fun drawCase(canvas: Canvas, s: Float) {
+        // The open lid, behind the base.
+        rect.set(-0.19f * s, -0.2f * s, 0.19f * s, 0.05f * s)
         paint.style = Paint.Style.FILL
-        paint.color = Color.WHITE
-        canvas.drawRoundRect(rect, r * 0.09f, r * 0.09f, paint)
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = stroke
-        paint.color = accent
-        canvas.drawRoundRect(rect, r * 0.09f, r * 0.09f, paint)
+        paint.color = caseLid
+        canvas.drawRoundRect(rect, 0.1f * s, 0.1f * s, paint)
 
+        // The base of the case.
+        rect.set(-0.23f * s, -0.02f * s, 0.23f * s, 0.28f * s)
+        paint.color = caseBase
+        canvas.drawRoundRect(rect, 0.1f * s, 0.1f * s, paint)
+
+        // A small round logo on the front.
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = resources.displayMetrics.density * 1.2f
+        paint.color = Color.WHITE
+        canvas.drawCircle(0f, 0.14f * s, 0.04f * s, paint)
+    }
+
+    // side: -1 = left earbud (on the left of the case), 1 = right earbud (on the right of the case).
+    private fun drawBud(canvas: Canvas, s: Float, side: Int) {
+        val stroke = resources.displayMetrics.density * 1.5f
+        canvas.save()
+        canvas.translate(side * 0.38f * s, -0.02f * s)
+        canvas.rotate(side * 14f)
+
+        // The stem.
+        rect.set(-0.035f * s, -0.04f * s, 0.035f * s, 0.2f * s)
         paint.style = Paint.Style.FILL
         paint.color = Color.WHITE
-        canvas.drawCircle(0f, -r * 0.2f, r * 0.3f, paint)
+        canvas.drawRoundRect(rect, 0.035f * s, 0.035f * s, paint)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = stroke
         paint.color = accent
-        canvas.drawCircle(0f, -r * 0.2f, r * 0.3f, paint)
+        canvas.drawRoundRect(rect, 0.035f * s, 0.035f * s, paint)
+
+        // The head.
+        paint.style = Paint.Style.FILL
+        paint.color = Color.WHITE
+        canvas.drawCircle(0f, -0.1f * s, 0.1f * s, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = stroke
+        paint.color = accent
+        canvas.drawCircle(0f, -0.1f * s, 0.1f * s, paint)
+        canvas.restore()
     }
 }
