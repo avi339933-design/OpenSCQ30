@@ -11,7 +11,7 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
-enum class IconKind { BACK, REFRESH, GEAR, SOUND, EQUALIZER, TOUCH }
+enum class IconKind { BACK, REFRESH, GEAR, SOUND, EQUALIZER, TOUCH, GAUGE }
 
 // Simple icons drawn in code (the lite app has no image resources). Everything is drawn in a 24x24 space.
 class IconView(context: Context, private val kind: IconKind, tint: Int) : View(context) {
@@ -48,6 +48,7 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
             IconKind.SOUND -> drawSound(canvas)
             IconKind.EQUALIZER -> drawEqualizer(canvas)
             IconKind.TOUCH -> drawTouch(canvas)
+            IconKind.GAUGE -> drawGauge(canvas)
         }
         canvas.restore()
     }
@@ -114,6 +115,15 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
         canvas.drawRoundRect(rect, 2.5f, 2.5f, paint)
         rect.set(5.5f, 11f, 19f, 21.5f)
         canvas.drawRoundRect(rect, 4f, 4f, paint)
+    }
+
+    // A pressure gauge: an open arc with a needle.
+    private fun drawGauge(canvas: Canvas) {
+        rect.set(3f, 3f, 21f, 21f)
+        canvas.drawArc(rect, 150f, 240f, false, paint)
+        canvas.drawLine(12f, 13f, 16f, 8f, paint)
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(12f, 13f, 1.6f, paint)
     }
 }
 
