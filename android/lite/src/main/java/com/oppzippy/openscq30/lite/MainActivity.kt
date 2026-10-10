@@ -23,6 +23,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -88,6 +89,10 @@ class MainActivity : Activity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs by lazy { getSharedPreferences("lite", MODE_PRIVATE) }
     private val uiHandler = Handler(Looper.getMainLooper())
+
+    // false: the Android status bar stays visible, translucent and drawn over the top of the app (the app adds
+    // padding under it, so nothing is hidden). true: the status bar is hidden completely, for the most space.
+    private val hideStatusBar = false
 
     private var session: OpenScq30Session? = null
     private var nativeReady = false
@@ -276,7 +281,10 @@ class MainActivity : Activity() {
         when (currentScreen) {
             Screen.CONNECTED -> {
                 connectionView?.text = statusLines.takeLast(15).joinToString("\n")
-                miniStatus?.text = statusLines.lastOrNull()?.lineSequence()?.firstOrNull()?.take(70) ?: ""
+                // The header shows only the latest short status, not the long "missing translation" list
+                // (that list stays in the log on the "more" page).
+                miniStatus?.text = statusLines.lastOrNull { !it.startsWith("חסר תרגום") }
+                    ?.lineSequence()?.firstOrNull()?.take(60) ?: ""
             }
             else -> statusView?.text = statusLines.takeLast(5).joinToString("\n")
         }
@@ -338,6 +346,14 @@ class MainActivity : Activity() {
     // ---------- look and feel helpers ----------
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    // The window is drawn under a translucent status bar (see onCreate), so the top of every screen gets this
+    // much padding and nothing is hidden behind the bar. It is 0 when the status bar is hidden completely.
+    private fun topInset(): Int {
+        if (hideStatusBar) return 0
+        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else dp(24)
+    }
 
     private fun rounded(fill: Int, radiusDp: Int, stroke: Int = 0, strokeDp: Int = 0): GradientDrawable {
         val drawable = GradientDrawable()
@@ -591,6 +607,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(colBg)
+        root.setPadding(0, topInset(), 0, 0)
         rtl(root)
         root.addView(logo, matchWrap())
         root.addView(heading, matchWrap())
@@ -627,7 +644,7 @@ class MainActivity : Activity() {
             card.background = cardBackground()
             card.setPadding(dp(12), dp(12), dp(12), dp(12))
 
-            card.addView(EarbudsView(this, colAccentSoft, colAccent), LinearLayout.LayoutParams(dp(56), dp(56)))
+            card.addView(EarbudsView(this, colAccentSoft, colAccent), LinearLayout.LayoutParams(dp(76), dp(56)))
 
             val title = if (row.model != null) {
                 modelName(row.model)
@@ -825,6 +842,7 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        root.setPadding(0, topInset(), 0, 0)
         rtl(root)
         root.addView(title, matchWrap())
         root.addView(search, matchWrap())
@@ -1010,10 +1028,12 @@ class MainActivity : Activity() {
         root.setBackgroundColor(colBg)
         rtl(root)
 
-        // White header: top bar, earbuds picture, batteries, one status line and the tabs.
+        // White header: top bar, earbuds picture, batteries, one status line and the tabs. The white continues
+        // up under the (translucent) status bar of the phone.
         val header = LinearLayout(this)
         header.orientation = LinearLayout.VERTICAL
         header.setBackgroundColor(colCard)
+        header.setPadding(0, topInset(), 0, 0)
 
         // Top bar: back, device name, reconnect, and the gear that opens the "more" page.
         val topRow = LinearLayout(this)
@@ -1030,8 +1050,9 @@ class MainActivity : Activity() {
         topRow.addView(iconButton(IconKind.GEAR) { showPage(PAGE_MORE) }, wrapParams())
         header.addView(topRow, matchWrap())
 
+        // The case in the middle, the left earbud on its left and the right earbud on its right.
         val hero = EarbudsView(this, colAccentSoft, colAccent)
-        val heroParams = LinearLayout.LayoutParams(dp(72), dp(72))
+        val heroParams = LinearLayout.LayoutParams(dp(100), dp(72))
         heroParams.gravity = Gravity.CENTER_HORIZONTAL
         heroParams.topMargin = dp(2)
         header.addView(hero, heroParams)
@@ -1050,7 +1071,7 @@ class MainActivity : Activity() {
 
         val miniLog = makeText("", 10f, colSubText)
         miniLog.gravity = Gravity.CENTER
-        miniLog.maxLines = 2
+        miniLog.maxLines = 1
         miniStatus = miniLog
         header.addView(miniLog, matchWrap())
 
@@ -2017,9 +2038,19 @@ class MainActivity : Activity() {
     // ---------- lifecycle ----------
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Light theme, set here so that AndroidManifest.xml does not need to change.
-        setTheme(android.R.style.Theme_Holo_Light)
+        // Light theme without the Android title bar (the "OpenSCQ30 Lite" strip), so the app uses the whole
+        // screen. Set here so that AndroidManifest.xml does not need to change.
+        setTheme(android.R.style.Theme_Holo_Light_NoActionBar)
         super.onCreate(savedInstanceState)
+
+        // Either hide the status bar completely, or draw the app under a translucent status bar.
+        window.addFlags(
+            if (hideStatusBar) {
+                WindowManager.LayoutParams.FLAG_FULLSCREEN
+            } else {
+                WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
+            },
+        )
 
         val filter = IntentFilter()
         filter.addAction(BluetoothDevice.ACTION_FOUND)
@@ -2028,7 +2059,7 @@ class MainActivity : Activity() {
         registerReceiver(scanReceiver, filter)
 
         showList()
-        line("גרסה: v13-סאונד")
+        line("גרסה: v14-מסך מלא")
         line("גרסת אנדרואיד (SDK): ${Build.VERSION.SDK_INT}")
 
         try {
