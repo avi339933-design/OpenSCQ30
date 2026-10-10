@@ -64,6 +64,7 @@ class MainActivity : Activity() {
         private const val MAX_CONNECT_ATTEMPTS = 3
         private const val RETRY_DELAY_MS = 1500L
         private const val KEY_SEND_DELAY_MS = 700L
+        private const val MAX_SEGMENTS = 11
 
         private const val PAGE_SOUND = 0
         private const val PAGE_EQ = 1
@@ -78,7 +79,7 @@ class MainActivity : Activity() {
 
     private class SettingItem(val category: String, val key: String, val setting: Any?)
 
-    private class TabItem(val root: LinearLayout, val button: Button, val underline: View)
+    private class TabItem(val root: LinearLayout, val icon: IconView, val underline: View)
 
     private class BatteryBlock(val root: LinearLayout, val percent: TextView, val fill: View, val rest: View)
 
@@ -106,13 +107,14 @@ class MainActivity : Activity() {
 
     private var statusView: TextView? = null
     private var connectionView: TextView? = null
-    private var listView: ListView? = null
+    private var cardsContainer: LinearLayout? = null
+    private var lastRowsSignature = ""
 
     // ----- connected screen: header, tabs and pages -----
-    private val pageTitles = listOf("סאונד", "איקוולייזר", "כפתורים", "עוד")
     private val pages = ArrayList<LinearLayout>()
     private val tabItems = ArrayList<TabItem>()
     private val batteryBlocks = HashMap<String, BatteryBlock>()
+    private var currentPage = PAGE_SOUND
     private var scrollViewMain: ScrollView? = null
     private var titleView: TextView? = null
     private var miniStatus: TextView? = null
@@ -150,8 +152,8 @@ class MainActivity : Activity() {
     private val colText = 0xFF1B1F24.toInt()
     private val colSubText = 0xFF6B7480.toInt()
     private val colChip = 0xFFE9EDF2.toInt()
-    private val colGoodLight = 0xFF8CF5B0.toInt()
-    private val colBadLight = 0xFFFF8A80.toInt()
+    private val colGood = 0xFF2EAE4F.toInt()
+    private val colBad = 0xFFE0453A.toInt()
 
     // Only devices whose Bluetooth MAC address starts with one of these prefixes (the first 3 bytes,
     // which identify the manufacturer) are shown by default. The device name is NOT used for filtering.
@@ -324,15 +326,6 @@ class MainActivity : Activity() {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
-    // Plain button, used on the device list and model picker screens.
-    private fun makeButton(label: String, onClick: () -> Unit): Button {
-        val button = Button(this)
-        button.text = label
-        button.textSize = 12f
-        button.setOnClickListener { onClick() }
-        return button
-    }
-
     private fun matchWrap() =
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
@@ -342,13 +335,24 @@ class MainActivity : Activity() {
     private fun wrapParams() =
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
-    // ---------- look and feel helpers (connected screen) ----------
+    // ---------- look and feel helpers ----------
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
     private fun rounded(fill: Int, radiusDp: Int, stroke: Int = 0, strokeDp: Int = 0): GradientDrawable {
         val drawable = GradientDrawable()
         drawable.setColor(fill)
+        drawable.cornerRadius = dp(radiusDp).toFloat()
+        if (strokeDp > 0) drawable.setStroke(dp(strokeDp), stroke)
+        return drawable
+    }
+
+    // The blue gradient used for selected buttons and the level bar, like the original app.
+    private fun gradientRounded(radiusDp: Int, stroke: Int = 0, strokeDp: Int = 0): GradientDrawable {
+        val drawable = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(colAccent, colAccentDark),
+        )
         drawable.cornerRadius = dp(radiusDp).toFloat()
         if (strokeDp > 0) drawable.setStroke(dp(strokeDp), stroke)
         return drawable
@@ -364,11 +368,16 @@ class MainActivity : Activity() {
 
     // The focused (keypad) and pressed states get a dark outline, so it is always clear where the focus is.
     private fun chipBackground(selected: Boolean): StateListDrawable {
-        val base = if (selected) colAccent else colChip
         val states = StateListDrawable()
-        states.addState(intArrayOf(android.R.attr.state_focused), rounded(base, 10, colText, 2))
-        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(base, 10, colText, 2))
-        states.addState(intArrayOf(), rounded(base, 10))
+        if (selected) {
+            states.addState(intArrayOf(android.R.attr.state_focused), gradientRounded(10, colText, 2))
+            states.addState(intArrayOf(android.R.attr.state_pressed), gradientRounded(10, colText, 2))
+            states.addState(intArrayOf(), gradientRounded(10))
+        } else {
+            states.addState(intArrayOf(android.R.attr.state_focused), rounded(colChip, 10, colText, 2))
+            states.addState(intArrayOf(android.R.attr.state_pressed), rounded(colChip, 10, colText, 2))
+            states.addState(intArrayOf(), rounded(colChip, 10))
+        }
         return states
     }
 
@@ -385,24 +394,6 @@ class MainActivity : Activity() {
         button.minimumHeight = dp(34)
         button.setPadding(dp(8), dp(4), dp(8), dp(4))
         styleChip(button, selected)
-        button.setOnClickListener { onClick() }
-        return button
-    }
-
-    // A translucent white button for the blue header.
-    private fun ghostChip(label: String, onClick: () -> Unit): Button {
-        val button = Button(this)
-        button.text = label
-        button.textSize = 11f
-        button.minHeight = dp(32)
-        button.minimumHeight = dp(32)
-        button.setPadding(dp(10), dp(2), dp(10), dp(2))
-        button.setTextColor(Color.WHITE)
-        val states = StateListDrawable()
-        states.addState(intArrayOf(android.R.attr.state_focused), rounded(0x66FFFFFF, 16, Color.WHITE, 2))
-        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(0x66FFFFFF, 16, Color.WHITE, 2))
-        states.addState(intArrayOf(), rounded(0x33FFFFFF, 16))
-        button.background = states
         button.setOnClickListener { onClick() }
         return button
     }
@@ -432,6 +423,15 @@ class MainActivity : Activity() {
         return params
     }
 
+    // A device card on the "my devices" screen: outlined in blue while it has the keypad focus.
+    private fun cardBackground(): StateListDrawable {
+        val states = StateListDrawable()
+        states.addState(intArrayOf(android.R.attr.state_focused), rounded(colAccentSoft, 14, colAccent, 2))
+        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(colAccentSoft, 14, colAccent, 2))
+        states.addState(intArrayOf(), rounded(colCard, 14, colStroke, 1))
+        return states
+    }
+
     // A tappable row (focusable with the keypad), highlighted when selected and outlined when focused.
     private fun rowBackground(selected: Boolean): StateListDrawable {
         val states = StateListDrawable()
@@ -440,6 +440,19 @@ class MainActivity : Activity() {
         states.addState(
             intArrayOf(),
             if (selected) rounded(colAccentSoft, 10) else ColorDrawable(Color.TRANSPARENT),
+        )
+        return states
+    }
+
+    // One segment of the level bar: a white rounded block when selected, outlined when it has the keypad focus.
+    private fun segmentBackground(selected: Boolean): StateListDrawable {
+        val states = StateListDrawable()
+        val focusFill = if (selected) Color.WHITE else 0x66FFFFFF
+        states.addState(intArrayOf(android.R.attr.state_focused), rounded(focusFill, 8, colText, 2))
+        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(focusFill, 8, colText, 2))
+        states.addState(
+            intArrayOf(),
+            if (selected) rounded(Color.WHITE, 8) else ColorDrawable(Color.TRANSPARENT),
         )
         return states
     }
@@ -453,6 +466,19 @@ class MainActivity : Activity() {
         row.setPadding(dp(8), dp(8), dp(8), dp(8))
         row.background = rowBackground(false)
         return row
+    }
+
+    // A focusable icon button for the top bar.
+    private fun iconButton(kind: IconKind, onClick: () -> Unit): LinearLayout {
+        val holder = LinearLayout(this)
+        holder.gravity = Gravity.CENTER
+        holder.isFocusable = true
+        holder.isClickable = true
+        holder.background = rowBackground(false)
+        holder.setPadding(dp(8), dp(8), dp(8), dp(8))
+        holder.addView(IconView(this, kind, colText), LinearLayout.LayoutParams(dp(24), dp(24)))
+        holder.setOnClickListener { onClick() }
+        return holder
     }
 
     private fun styleRadio(radio: RadioRow, selected: Boolean) {
@@ -510,71 +536,127 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- device list screen ----------
+    // ---------- "my devices" screen ----------
 
     private fun showList() {
         currentScreen = Screen.LIST
         connectionView = null
+        miniStatus = null
+        lastRowsSignature = ""
 
-        val showAllButton = makeButton(if (showAll) "הכל: פעיל" else "הכל: כבוי") {}
+        val showAllButton = chip(if (showAll) "הכל: פעיל" else "הכל: כבוי", showAll) {}
         showAllButton.setOnClickListener {
             showAll = !showAll
             showAllButton.text = if (showAll) "הכל: פעיל" else "הכל: כבוי"
+            styleChip(showAllButton, showAll)
             refreshDeviceList()
         }
-        val buttons = LinearLayout(this)
-        buttons.orientation = LinearLayout.HORIZONTAL
-        buttons.addView(makeButton("סרוק") { startScan() }, weightParams())
-        buttons.addView(makeButton("רענן") { refreshDeviceList() }, weightParams())
-        buttons.addView(showAllButton, weightParams())
-        buttons.addView(
-            makeButton("עדכון") {
+
+        val actions = LinearLayout(this)
+        actions.orientation = LinearLayout.HORIZONTAL
+        actions.setPadding(dp(6), dp(2), dp(6), dp(2))
+        fun addAction(button: Button) {
+            val params = weightParams()
+            params.setMargins(dp(2), 0, dp(2), 0)
+            actions.addView(button, params)
+        }
+        addAction(chip("סרוק", false) { startScan() })
+        addAction(chip("רענן", false) { refreshDeviceList() })
+        addAction(showAllButton)
+        addAction(
+            chip("עדכון", false) {
                 UpdateManager.showUpdateDialog(this, { disconnect("עדכון") }, { line(it) })
             },
-            weightParams(),
         )
 
-        val list = ListView(this)
-        listView = list
-        list.setOnItemClickListener { _, _, position, _ ->
-            if (position < deviceRows.size) onDeviceChosen(deviceRows[position])
-        }
-        list.setOnItemLongClickListener { _, _, position, _ ->
-            if (position < deviceRows.size && deviceRows[position].bonded) showDeviceMenu(deviceRows[position])
-            true
-        }
+        val container = LinearLayout(this)
+        container.orientation = LinearLayout.VERTICAL
+        container.setPadding(0, dp(2), 0, dp(8))
+        cardsContainer = container
+        val scroll = ScrollView(this)
+        scroll.addView(container)
+
+        val logo = makeText("soundcore", 20f, colAccent, true)
+        logo.gravity = Gravity.CENTER
+        logo.setTypeface(logo.typeface, Typeface.BOLD_ITALIC)
+        val heading = makeText("המכשירים שלי", 14f, colSubText)
+        heading.setPadding(dp(14), dp(2), dp(14), dp(2))
 
         val status = TextView(this)
-        status.textSize = 11f
-        status.setPadding(8, 8, 8, 8)
+        status.textSize = 10f
+        status.setTextColor(colSubText)
+        status.setPadding(dp(8), dp(4), dp(8), dp(4))
         statusView = status
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        root.setBackgroundColor(colBg)
         rtl(root)
-        root.addView(buttons, matchWrap())
-        root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(logo, matchWrap())
+        root.addView(heading, matchWrap())
+        root.addView(actions, matchWrap())
+        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(status, matchWrap())
         setContentView(root)
 
-        updateListAdapter()
+        renderCards()
         renderStatus()
         refreshDeviceList()
     }
 
-    private fun rowText(row: Row): String {
-        val name = row.name.ifEmpty { "לא ידוע" }
-        val modelLine = when {
-            !row.bonded -> "(בקרבת מקום – לחץ לזיווג)"
-            row.model != null -> "דגם: ${modelName(row.model)}"
-            else -> "(לחץ לבחירת דגם)"
+    // Builds one card per device. The cards are rebuilt only when the list really changed, so the keypad focus
+    // does not jump while the scan keeps reporting the same devices.
+    private fun renderCards() {
+        val container = cardsContainer ?: return
+        val signature = deviceRows.joinToString("|") { "${it.mac}/${it.name}/${it.model}/${it.bonded}" }
+        if (signature == lastRowsSignature) return
+        lastRowsSignature = signature
+        container.removeAllViews()
+        if (deviceRows.isEmpty()) {
+            val empty = makeText("אין מכשירים להצגה", 12f, colSubText)
+            empty.setPadding(dp(14), dp(10), dp(14), dp(10))
+            container.addView(empty, matchWrap())
+            return
         }
-        return "$name\n${row.mac}\n$modelLine"
-    }
+        deviceRows.forEach { row ->
+            val card = LinearLayout(this)
+            card.orientation = LinearLayout.HORIZONTAL
+            card.gravity = Gravity.CENTER_VERTICAL
+            card.isFocusable = true
+            card.isClickable = true
+            card.background = cardBackground()
+            card.setPadding(dp(12), dp(12), dp(12), dp(12))
 
-    private fun updateListAdapter() {
-        val texts = deviceRows.map { rowText(it) }
-        listView?.adapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, texts)
+            card.addView(EarbudsView(this, colAccentSoft, colAccent), LinearLayout.LayoutParams(dp(56), dp(56)))
+
+            val title = if (row.model != null) {
+                modelName(row.model)
+            } else {
+                row.name.ifEmpty { "לא ידוע" }
+            }
+            val status = when {
+                !row.bonded -> "בקרבת מקום – לחץ לזיווג"
+                row.model != null -> "לא מחובר"
+                else -> "לחץ לבחירת דגם"
+            }
+            val texts = LinearLayout(this)
+            texts.orientation = LinearLayout.VERTICAL
+            texts.addView(makeText(title, 15f, colText, true), matchWrap())
+            texts.addView(makeText(status, 12f, colSubText), matchWrap())
+            if (row.bonded && row.model != null && row.name.isNotEmpty() && row.name != title) {
+                texts.addView(makeText(row.name, 10f, colSubText), matchWrap())
+            }
+            val textParams = weightParams()
+            textParams.marginStart = dp(12)
+            card.addView(texts, textParams)
+
+            card.setOnClickListener { onDeviceChosen(row) }
+            card.setOnLongClickListener {
+                if (row.bonded) showDeviceMenu(row)
+                true
+            }
+            container.addView(card, cardParams())
+        }
     }
 
     // All paired (bonded) Bluetooth devices, each with its assigned model (or null).
@@ -598,7 +680,7 @@ class MainActivity : Activity() {
             .filter { it.key !in bondedMacs && (showAll || isAnker(it.key)) }
             .map { Row(it.value, it.key, null, false) }
         deviceRows = bonded + nearby
-        updateListAdapter()
+        renderCards()
     }
 
     private fun refreshDeviceList() {
@@ -692,6 +774,7 @@ class MainActivity : Activity() {
         currentScreen = Screen.PICKER
         connectionView = null
         statusView = null
+        cardsContainer = null
 
         val models: List<Pair<String, String>> = try {
             deviceModels()
@@ -847,19 +930,19 @@ class MainActivity : Activity() {
 
         val top = LinearLayout(this)
         top.orientation = LinearLayout.HORIZONTAL
-        top.addView(makeText(label, 10f, 0xCCFFFFFF.toInt()), weightParams())
-        val percent = makeText("", 12f, Color.WHITE, true)
+        top.addView(makeText(label, 10f, colSubText), weightParams())
+        val percent = makeText("", 11f, colText, true)
         top.addView(percent, wrapParams())
         root.addView(top, matchWrap())
 
         val track = LinearLayout(this)
         track.orientation = LinearLayout.HORIZONTAL
-        track.background = rounded(0x55FFFFFF, 3)
+        track.background = rounded(colStroke, 3)
         val fill = View(this)
         val rest = View(this)
-        track.addView(fill, LinearLayout.LayoutParams(0, dp(5), 0f))
-        track.addView(rest, LinearLayout.LayoutParams(0, dp(5), 100f))
-        val trackParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(5))
+        track.addView(fill, LinearLayout.LayoutParams(0, dp(4), 0f))
+        track.addView(rest, LinearLayout.LayoutParams(0, dp(4), 100f))
+        val trackParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4))
         trackParams.topMargin = dp(2)
         root.addView(track, trackParams)
         return BatteryBlock(root, percent, fill, rest)
@@ -874,39 +957,37 @@ class MainActivity : Activity() {
         block.root.visibility = View.VISIBLE
         val percent = (Regex("\\d+").find(value)?.value?.toIntOrNull() ?: 0).coerceIn(0, 100)
         block.percent.text = value
-        block.fill.background = rounded(if (percent < 20) colBadLight else colGoodLight, 3)
+        block.fill.background = rounded(if (percent < 20) colBad else colGood, 3)
         (block.fill.layoutParams as LinearLayout.LayoutParams).weight = percent.toFloat()
         (block.rest.layoutParams as LinearLayout.LayoutParams).weight = (100 - percent).toFloat()
         block.fill.requestLayout()
         block.rest.requestLayout()
     }
 
-    private fun makeTab(label: String, onClick: () -> Unit): TabItem {
+    // An icon tab with a blue line under the selected one.
+    private fun makeTab(kind: IconKind, onClick: () -> Unit): TabItem {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        val button = Button(this)
-        button.text = label
-        button.textSize = 12f
-        button.minHeight = dp(34)
-        button.minimumHeight = dp(34)
-        button.setPadding(dp(2), dp(4), dp(2), dp(4))
-        val states = StateListDrawable()
-        states.addState(intArrayOf(android.R.attr.state_focused), rounded(colAccentSoft, 10, colAccent, 2))
-        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(colAccentSoft, 10, colAccent, 2))
-        states.addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
-        button.background = states
-        button.setOnClickListener { onClick() }
+        root.gravity = Gravity.CENTER_HORIZONTAL
+        root.isFocusable = true
+        root.isClickable = true
+        root.background = rowBackground(false)
+        root.setPadding(0, dp(6), 0, dp(2))
+        val icon = IconView(this, kind, colSubText)
+        val iconParams = LinearLayout.LayoutParams(dp(26), dp(26))
+        iconParams.gravity = Gravity.CENTER_HORIZONTAL
+        root.addView(icon, iconParams)
         val underline = View(this)
-        root.addView(button, matchWrap())
-        val lineParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3))
-        lineParams.setMargins(dp(10), 0, dp(10), 0)
+        val lineParams = LinearLayout.LayoutParams(dp(24), dp(3))
+        lineParams.gravity = Gravity.CENTER_HORIZONTAL
+        lineParams.topMargin = dp(4)
         root.addView(underline, lineParams)
-        return TabItem(root, button, underline)
+        root.setOnClickListener { onClick() }
+        return TabItem(root, icon, underline)
     }
 
     private fun styleTab(tab: TabItem, selected: Boolean) {
-        tab.button.setTextColor(if (selected) colAccentDark else colSubText)
-        tab.button.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        tab.icon.setTint(if (selected) colAccent else colSubText)
         tab.underline.setBackgroundColor(if (selected) colAccent else Color.TRANSPARENT)
     }
 
@@ -914,6 +995,7 @@ class MainActivity : Activity() {
         currentScreen = Screen.CONNECTED
         currentMac = mac
         statusView = null
+        cardsContainer = null
         controls.clear()
         sections.clear()
         loggedSkips.clear()
@@ -928,31 +1010,37 @@ class MainActivity : Activity() {
         root.setBackgroundColor(colBg)
         rtl(root)
 
-        // Header: a blue banner with back, device name, reconnect and the three batteries.
+        // White header: top bar, earbuds picture, batteries, one status line and the tabs.
         val header = LinearLayout(this)
         header.orientation = LinearLayout.VERTICAL
-        val gradient = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(colAccent, colAccentDark))
-        val radius = dp(20).toFloat()
-        gradient.cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, radius, radius, radius, radius)
-        header.background = gradient
-        header.setPadding(dp(8), dp(8), dp(8), dp(10))
+        header.setBackgroundColor(colCard)
 
+        // Top bar: back, device name, reconnect, and the gear that opens the "more" page.
         val topRow = LinearLayout(this)
         topRow.orientation = LinearLayout.HORIZONTAL
         topRow.gravity = Gravity.CENTER_VERTICAL
-        topRow.addView(ghostChip("חזרה") { onBackPressed() }, wrapParams())
+        topRow.setPadding(dp(4), dp(2), dp(4), 0)
+        topRow.addView(iconButton(IconKind.BACK) { onBackPressed() }, wrapParams())
         val deviceName = bondedRows.firstOrNull { it.mac.equals(mac, ignoreCase = true) }?.name ?: mac
-        val title = makeText(deviceName, 16f, Color.WHITE, true)
+        val title = makeText(deviceName, 16f, colText, true)
         title.gravity = Gravity.CENTER
         titleView = title
         topRow.addView(title, weightParams())
-        topRow.addView(ghostChip("חיבור מחדש") { startConnection(currentMac) }, wrapParams())
+        topRow.addView(iconButton(IconKind.REFRESH) { startConnection(currentMac) }, wrapParams())
+        topRow.addView(iconButton(IconKind.GEAR) { showPage(PAGE_MORE) }, wrapParams())
         header.addView(topRow, matchWrap())
 
+        val hero = EarbudsView(this, colAccentSoft, colAccent)
+        val heroParams = LinearLayout.LayoutParams(dp(72), dp(72))
+        heroParams.gravity = Gravity.CENTER_HORIZONTAL
+        heroParams.topMargin = dp(2)
+        header.addView(hero, heroParams)
+
+        // Batteries. The first child is on the right, so the order on screen is: left earbud, right earbud, case.
         val batteryRow = LinearLayout(this)
         batteryRow.orientation = LinearLayout.HORIZONTAL
-        batteryRow.setPadding(0, dp(6), 0, 0)
-        listOf("right" to "ימין", "left" to "שמאל", "case" to "מארז").forEach { (id, label) ->
+        batteryRow.setPadding(dp(8), dp(6), dp(8), 0)
+        listOf("case" to "מארז", "right" to "ימין", "left" to "שמאל").forEach { (id, label) ->
             val block = batteryBlock(label)
             block.root.visibility = View.INVISIBLE
             batteryBlocks[id] = block
@@ -960,30 +1048,33 @@ class MainActivity : Activity() {
         }
         header.addView(batteryRow, matchWrap())
 
-        val miniLog = makeText("", 10f, 0xCCFFFFFF.toInt())
+        val miniLog = makeText("", 10f, colSubText)
         miniLog.gravity = Gravity.CENTER
         miniLog.maxLines = 2
         miniStatus = miniLog
         header.addView(miniLog, matchWrap())
-        root.addView(header, matchWrap())
 
-        // Tabs. Keys 1-4 switch between them.
+        // Tabs (icons only). Keys 1-4 switch between the pages; the 4th page ("more") opens with the gear.
         val tabs = LinearLayout(this)
         tabs.orientation = LinearLayout.HORIZONTAL
-        tabs.setBackgroundColor(colCard)
-        tabs.setPadding(dp(4), dp(2), dp(4), 0)
-        pageTitles.forEachIndexed { index, label ->
-            val tab = makeTab(label) { showPage(index) }
+        tabs.setPadding(dp(8), dp(2), dp(8), 0)
+        listOf(IconKind.SOUND, IconKind.EQUALIZER, IconKind.TOUCH).forEachIndexed { index, kind ->
+            val tab = makeTab(kind) { showPage(index) }
             tabItems.add(tab)
             tabs.addView(tab.root, weightParams())
         }
-        root.addView(tabs, matchWrap())
+        header.addView(tabs, matchWrap())
+        root.addView(header, matchWrap())
+
+        val divider = View(this)
+        divider.setBackgroundColor(colStroke)
+        root.addView(divider, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
 
         // Pages.
         val content = LinearLayout(this)
         content.orientation = LinearLayout.VERTICAL
-        content.setPadding(0, dp(4), 0, dp(16))
-        pageTitles.forEach { _ ->
+        content.setPadding(0, dp(6), 0, dp(16))
+        for (i in 0..PAGE_MORE) {
             val page = LinearLayout(this)
             page.orientation = LinearLayout.VERTICAL
             pages.add(page)
@@ -1043,6 +1134,7 @@ class MainActivity : Activity() {
     }
 
     private fun showPage(index: Int) {
+        currentPage = index
         pages.forEachIndexed { i, page -> page.visibility = if (i == index) View.VISIBLE else View.GONE }
         tabItems.forEachIndexed { i, tab -> styleTab(tab, i == index) }
         scrollViewMain?.scrollTo(0, 0)
@@ -1055,7 +1147,7 @@ class MainActivity : Activity() {
         sideRightButton?.let { styleChip(it, side == 1) }
     }
 
-    // Keys 1-4 switch between the tabs (handy on a keypad phone).
+    // Keys 1-4 switch between the pages (handy on a keypad phone).
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (currentScreen == Screen.CONNECTED && pages.isNotEmpty()) {
             val index = keyCode - KeyEvent.KEYCODE_1
@@ -1381,7 +1473,9 @@ class MainActivity : Activity() {
     }
 
     // Read-only information: the name on one side and the value on the other.
+    // The air pressure gets its own light-blue box with a gauge icon, like the original app.
     private fun infoControl(key: String, initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
+        if (key.lowercase(Locale.US).contains("airpressure")) return pressureControl(initial, textOf)
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
@@ -1391,6 +1485,30 @@ class MainActivity : Activity() {
         row.addView(name, weightParams())
         row.addView(value, wrapParams())
         return Pair(row, { s -> value.text = textOf(s) })
+    }
+
+    private fun pressureControl(initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.HORIZONTAL
+        box.gravity = Gravity.CENTER_VERTICAL
+        box.background = rounded(colAccentSoft, 12)
+        box.setPadding(dp(10), dp(10), dp(10), dp(10))
+
+        val iconHolder = LinearLayout(this)
+        iconHolder.gravity = Gravity.CENTER
+        iconHolder.background = ovalDrawable(0xFFCDEEFA.toInt(), 0, 0)
+        iconHolder.addView(IconView(this, IconKind.GAUGE, colAccent), LinearLayout.LayoutParams(dp(26), dp(26)))
+        val iconParams = LinearLayout.LayoutParams(dp(44), dp(44))
+        iconParams.marginEnd = dp(10)
+        box.addView(iconHolder, iconParams)
+
+        val texts = LinearLayout(this)
+        texts.orientation = LinearLayout.VERTICAL
+        val value = makeText(initial, 15f, colText, true)
+        texts.addView(value, matchWrap())
+        texts.addView(makeText("לחץ אוויר נוכחי", 11f, colSubText), matchWrap())
+        box.addView(texts, weightParams())
+        return Pair(box, { s -> value.text = textOf(s) })
     }
 
     private fun toggleControl(device: Any, key: String, setting: Setting.ToggleSetting): Pair<View, (Any?) -> Unit> {
@@ -1532,13 +1650,76 @@ class MainActivity : Activity() {
         return Pair(root, updater)
     }
 
+    // A level bar for a short number range (up to MAX_SEGMENTS values): a blue gradient bar split into numbered
+    // segments, like the original app. Left/right keys move the focus between segments and OK selects one.
+    private fun segmentedRange(
+        device: Any,
+        key: String,
+        setting: Setting.I32RangeSetting,
+    ): Pair<View, (Any?) -> Unit> {
+        val range = setting.setting
+        val start = range.start
+        val step = if (range.step <= 0) 1 else range.step
+        val count = (range.end - start) / step + 1
+
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.addView(makeText(settingName(key), 13f, colText, true))
+
+        val bar = LinearLayout(this)
+        bar.orientation = LinearLayout.HORIZONTAL
+        bar.layoutDirection = View.LAYOUT_DIRECTION_LTR
+        bar.background = gradientRounded(10)
+        bar.setPadding(dp(3), dp(3), dp(3), dp(3))
+
+        val segments = ArrayList<Pair<Int, TextView>>()
+        var shown = Int.MIN_VALUE
+        fun highlight(current: Int) {
+            if (current == shown) return
+            shown = current
+            segments.forEach { (number, view) ->
+                val selected = number == current
+                view.background = segmentBackground(selected)
+                view.setTextColor(if (selected) colAccentDark else Color.WHITE)
+                view.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+            }
+        }
+
+        for (i in 0 until count) {
+            val number = start + i * step
+            val view = TextView(this)
+            view.text = "$number"
+            view.textSize = 12f
+            view.gravity = Gravity.CENTER
+            view.minHeight = dp(34)
+            view.isFocusable = true
+            view.isClickable = true
+            view.setOnClickListener {
+                if (!updatingUi) {
+                    sendValue(device, key, Value.I32Value(number), "${settingName(key)} = $number")
+                    highlight(number)
+                }
+            }
+            segments.add(Pair(number, view))
+            bar.addView(view, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        highlight(setting.value)
+        root.addView(bar, matchWrap())
+
+        val updater: (Any?) -> Unit = { s ->
+            if (s is Setting.I32RangeSetting) highlight(s.value)
+        }
+        return Pair(root, updater)
+    }
+
     // Sliders: with touch the value is sent when the finger is lifted. With a keypad there is no "lifted" event,
-    // so the value is sent shortly after the last key press.
+    // so the value is sent shortly after the last key press. Short ranges use the level bar instead.
     private fun rangeControl(device: Any, key: String, setting: Setting.I32RangeSetting): Pair<View, (Any?) -> Unit> {
         val range = setting.setting
         val start = range.start
         val step = if (range.step <= 0) 1 else range.step
         val max = (range.end - start) / step
+        if (max + 1 <= MAX_SEGMENTS) return segmentedRange(device, key, setting)
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
@@ -1681,8 +1862,10 @@ class MainActivity : Activity() {
         return Pair(root, updater)
     }
 
-    // A choice between options. A short list (up to 4) is shown as rows with a round selector, like the original
-    // app. A long list is one row that shows the current choice and opens a list window.
+    // A choice between options.
+    // - Exactly two options: two side-by-side buttons, the chosen one in the blue gradient.
+    // - Up to 4 options: rows with a round selector, like the original app.
+    // - A longer list: one row that shows the current choice and opens a list window.
     // With allowNone, an extra "-" entry selects "no value".
     private fun choiceControl(
         device: Any,
@@ -1698,6 +1881,33 @@ class MainActivity : Activity() {
             entries.add(Pair(option, optionText(option, labels.getOrElse(i) { option })))
         }
         if (allowNone) entries.add(Pair(null, "-"))
+
+        if (!allowNone && entries.size == 2) {
+            val pillRoot = LinearLayout(this)
+            pillRoot.orientation = LinearLayout.VERTICAL
+            pillRoot.addView(makeText(settingName(key), 13f, colSubText, true))
+            val pillRow = LinearLayout(this)
+            pillRow.orientation = LinearLayout.HORIZONTAL
+            val pills = ArrayList<Pair<String?, Button>>()
+            fun highlightPills(current: String?) {
+                pills.forEach { styleChip(it.second, it.first == current) }
+            }
+            entries.forEach { (option, label) ->
+                val button = chip(label, false) {
+                    if (!updatingUi) {
+                        sendValue(device, key, makeValue(option), "${settingName(key)} = $label")
+                        highlightPills(option)
+                    }
+                }
+                val params = weightParams()
+                params.setMargins(dp(3), dp(3), dp(3), dp(3))
+                pillRow.addView(button, params)
+                pills.add(Pair(option, button))
+            }
+            pillRoot.addView(pillRow, matchWrap())
+            val pillUpdater: (Any?) -> Unit = { s -> highlightPills(currentOf(s)) }
+            return Pair(pillRoot, pillUpdater)
+        }
 
         if (entries.size > 4) {
             var current: String? = null
@@ -1818,7 +2028,7 @@ class MainActivity : Activity() {
         registerReceiver(scanReceiver, filter)
 
         showList()
-        line("גרסה: v11-עיצוב חי")
+        line("גרסה: v13-סאונד")
         line("גרסת אנדרואיד (SDK): ${Build.VERSION.SDK_INT}")
 
         try {
@@ -1872,6 +2082,11 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when (currentScreen) {
             Screen.CONNECTED -> {
+                // From the "more" page, back goes to the sound page first.
+                if (currentPage == PAGE_MORE) {
+                    showPage(PAGE_SOUND)
+                    return
+                }
                 autoConnectDone = true
                 resumeMac = null
                 disconnect("חזרה")
