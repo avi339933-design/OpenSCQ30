@@ -65,6 +65,7 @@ object HebrewLabels {
         "dualconnections" to "חיבור כפול",
         "dualconnectionsdevices" to "מכשירים בחיבור כפול",
         "airpressure" to "לחץ אוויר",
+        "atmospheric" to "לחץ אטמוספרי",
         "currentairpressure" to "לחץ אוויר נוכחי",
         "airpressureupdate" to "עדכון לחץ אוויר",
         "airpressureupdatemode" to "מצב עדכון לחץ אוויר",
@@ -190,9 +191,10 @@ object HebrewLabels {
         "right" to "ימין",
     )
 
-    private val secondsRegex = Regex("^(\\d+) seconds?$", RegexOption.IGNORE_CASE)
-    private val minutesRegex = Regex("^(\\d+) minutes?$", RegexOption.IGNORE_CASE)
-    private val hoursRegex = Regex("^(\\d+) hours?$", RegexOption.IGNORE_CASE)
+    // Long and short forms of a time: "15 seconds" / "10s", "1 minute" / "1m", "2 hours" / "2h".
+    private val secondsRegex = Regex("^(\\d+)\\s*(?:seconds?|secs?|s)$", RegexOption.IGNORE_CASE)
+    private val minutesRegex = Regex("^(\\d+)\\s*(?:minutes?|mins?|m)$", RegexOption.IGNORE_CASE)
+    private val hoursRegex = Regex("^(\\d+)\\s*(?:hours?|hrs?|h)$", RegexOption.IGNORE_CASE)
 
     // "15 seconds" -> "15 שניות", "1 minute" -> "דקה", "30 minutes" -> "30 דקות"
     private fun timeText(text: String): String? {
