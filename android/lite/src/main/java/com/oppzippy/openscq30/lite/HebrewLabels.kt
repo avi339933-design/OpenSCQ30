@@ -1,7 +1,7 @@
 package com.oppzippy.openscq30.lite
- 
+
 import java.util.Locale
- 
+
 /**
  * All Hebrew translations of setting names, categories, option labels and values.
  *
@@ -11,7 +11,7 @@ import java.util.Locale
  */
 object HebrewLabels {
     private fun norm(text: String): String = text.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
- 
+
     private val translations: Map<String, String> = mapOf(
         // categories
         "general" to "כללי",
@@ -32,7 +32,8 @@ object HebrewLabels {
         "noisecancelingmode" to "מצב ביטול רעשים",
         "transparencymode" to "מצב שקיפות",
         "manualtransparency" to "עוצמת שקיפות ידנית",
-        "windnoisesuppression" to "דיכוי רעש רוח",
+        "windnoisesuppression" to "הפחתת רעשי רוח",
+        "windnoisereduction" to "הפחתת רעשי רוח",
         "windnoisedetected" to "זוהה רעש רוח",
         "transparencymodeincycle" to "שקיפות במחזור הכפתורים",
         "noisecancelingmodeincycle" to "ביטול רעשים במחזור הכפתורים",
@@ -40,6 +41,11 @@ object HebrewLabels {
         "noisecancelingmodetype" to "סוג ביטול הרעשים",
         "adaptivenoisecancelling" to "ביטול רעשים אדפטיבי",
         "manualnoisecancelling" to "ביטול רעשים ידני",
+        "ambientsound" to "צליל סביבה",
+        "customnoisecanceling" to "ביטול רעשים מותאם אישית",
+        "customnoisecancelling" to "ביטול רעשים מותאם אישית",
+        "noisecancelinglevel" to "עוצמת ביטול רעשים",
+        "transparencylevel" to "עוצמת שקיפות",
         // battery and device
         "lowbatteryprompt" to "התראת סוללה חלשה",
         "batterylevelleft" to "סוללה – אוזנית שמאל",
@@ -59,6 +65,9 @@ object HebrewLabels {
         "dualconnections" to "חיבור כפול",
         "dualconnectionsdevices" to "מכשירים בחיבור כפול",
         "airpressure" to "לחץ אוויר",
+        "currentairpressure" to "לחץ אוויר נוכחי",
+        "airpressureupdate" to "עדכון לחץ אוויר",
+        "airpressureupdatemode" to "מצב עדכון לחץ אוויר",
         "twsstatus" to "מצב TWS",
         "hostdevice" to "אוזנית ראשית",
         // sound and misc
@@ -99,11 +108,19 @@ object HebrewLabels {
         "rightslidedown" to "אוזנית ימין – החלקה למטה",
         // options
         "noisecanceling" to "ביטול רעשים",
+        "noisecancelling" to "ביטול רעשים",
+        "anc" to "ביטול רעשים",
         "transparency" to "שקיפות",
+        "transparent" to "שקיפות",
+        "ambient" to "צליל סביבה",
         "normal" to "רגיל",
         "airplanemode" to "מצב טיסה",
         "adaptive" to "אדפטיבי",
         "manual" to "ידני",
+        "automatic" to "אוטומטי",
+        "auto" to "אוטומטי",
+        "automaticupdate" to "עדכון אוטומטי",
+        "manualupdate" to "עדכון ידני",
         "custom" to "מותאם אישית",
         "fulltransparency" to "שקיפות מלאה",
         "fully" to "שקיפות מלאה",
@@ -156,13 +173,13 @@ object HebrewLabels {
         "treblebooster" to "מגביר גבוהים",
         "treblereducer" to "מפחית גבוהים",
     )
- 
+
     // Option labels that the core gives in their own language (norm() would turn them into an empty key).
     private val nativeNames: Map<String, String> = mapOf(
         "中文" to "סינית",
         "日本語" to "יפנית",
     )
- 
+
     // Values of information settings (shown after the name, like "אוזנית שמאל נטענת: לא בטעינה").
     private val values: Map<String, String> = mapOf(
         "connected" to "מחובר",
@@ -172,11 +189,11 @@ object HebrewLabels {
         "left" to "שמאל",
         "right" to "ימין",
     )
- 
+
     private val secondsRegex = Regex("^(\\d+) seconds?$", RegexOption.IGNORE_CASE)
     private val minutesRegex = Regex("^(\\d+) minutes?$", RegexOption.IGNORE_CASE)
     private val hoursRegex = Regex("^(\\d+) hours?$", RegexOption.IGNORE_CASE)
- 
+
     // "15 seconds" -> "15 שניות", "1 minute" -> "דקה", "30 minutes" -> "30 דקות"
     private fun timeText(text: String): String? {
         val t = text.trim()
@@ -194,10 +211,10 @@ object HebrewLabels {
         }
         return null
     }
- 
+
     // Name of a setting or a category, or null if there is no translation yet.
     fun name(key: String): String? = translations[norm(key)]
- 
+
     // Label of an option (a button or a check box), or null if there is no translation yet.
     fun option(option: String, localized: String): String? =
         translations[norm(option)]
@@ -205,8 +222,7 @@ object HebrewLabels {
             ?: nativeNames[localized.trim()]
             ?: timeText(localized)
             ?: timeText(option)
- 
+
     // A value shown after a setting name; unknown values stay as they are.
     fun value(text: String): String = values[norm(text)] ?: timeText(text) ?: text
 }
- 
