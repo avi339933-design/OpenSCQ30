@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.os.Build
@@ -17,22 +18,19 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
-import android.text.SpannableStringBuilder
-import android.text.Spanned
 import android.text.TextWatcher
-import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.oppzippy.openscq30.lib.bindings.LanguageIdentifier
@@ -80,7 +78,11 @@ class MainActivity : Activity() {
 
     private class SettingItem(val category: String, val key: String, val setting: Any?)
 
-    private class ChoiceButton(val option: String?, val label: String, val button: Button)
+    private class TabItem(val root: LinearLayout, val button: Button, val underline: View)
+
+    private class BatteryBlock(val root: LinearLayout, val percent: TextView, val fill: View, val rest: View)
+
+    private class RadioRow(val option: String?, val root: LinearLayout, val dot: View, val label: TextView)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs by lazy { getSharedPreferences("lite", MODE_PRIVATE) }
@@ -109,10 +111,10 @@ class MainActivity : Activity() {
     // ----- connected screen: header, tabs and pages -----
     private val pageTitles = listOf("סאונד", "איקוולייזר", "כפתורים", "עוד")
     private val pages = ArrayList<LinearLayout>()
-    private val tabButtons = ArrayList<Button>()
+    private val tabItems = ArrayList<TabItem>()
+    private val batteryBlocks = HashMap<String, BatteryBlock>()
     private var scrollViewMain: ScrollView? = null
     private var titleView: TextView? = null
-    private var batteryView: TextView? = null
     private var miniStatus: TextView? = null
     private var moreContainer: LinearLayout? = null
     private var buttonsLeft: LinearLayout? = null
@@ -139,13 +141,17 @@ class MainActivity : Activity() {
 
     // Colors, close to the original Soundcore app.
     private val colAccent = 0xFF1CB5E8.toInt()
-    private val colBg = 0xFFF2F4F7.toInt()
+    private val colAccentDark = 0xFF2A7DE1.toInt()
+    private val colAccentSoft = 0xFFE6F6FD.toInt()
+    private val colBg = 0xFFF2F5FA.toInt()
     private val colCard = 0xFFFFFFFF.toInt()
+    private val colStroke = 0xFFE1E7F0.toInt()
+    private val colRadioOff = 0xFFB8C2D0.toInt()
     private val colText = 0xFF1B1F24.toInt()
     private val colSubText = 0xFF6B7480.toInt()
     private val colChip = 0xFFE9EDF2.toInt()
-    private val colGood = 0xFF2EAE4F.toInt()
-    private val colBad = 0xFFE0453A.toInt()
+    private val colGoodLight = 0xFF8CF5B0.toInt()
+    private val colBadLight = 0xFFFF8A80.toInt()
 
     // Only devices whose Bluetooth MAC address starts with one of these prefixes (the first 3 bytes,
     // which identify the manufacturer) are shown by default. The device name is NOT used for filtering.
@@ -330,6 +336,12 @@ class MainActivity : Activity() {
     private fun matchWrap() =
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
+    private fun weightParams(weight: Float = 1f) =
+        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight)
+
+    private fun wrapParams() =
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+
     // ---------- look and feel helpers (connected screen) ----------
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
@@ -342,13 +354,21 @@ class MainActivity : Activity() {
         return drawable
     }
 
+    private fun ovalDrawable(fill: Int, stroke: Int, strokeDp: Int): GradientDrawable {
+        val drawable = GradientDrawable()
+        drawable.shape = GradientDrawable.OVAL
+        drawable.setColor(fill)
+        if (strokeDp > 0) drawable.setStroke(dp(strokeDp), stroke)
+        return drawable
+    }
+
     // The focused (keypad) and pressed states get a dark outline, so it is always clear where the focus is.
     private fun chipBackground(selected: Boolean): StateListDrawable {
         val base = if (selected) colAccent else colChip
         val states = StateListDrawable()
-        states.addState(intArrayOf(android.R.attr.state_focused), rounded(base, 8, colText, 2))
-        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(base, 8, colText, 2))
-        states.addState(intArrayOf(), rounded(base, 8))
+        states.addState(intArrayOf(android.R.attr.state_focused), rounded(base, 10, colText, 2))
+        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(base, 10, colText, 2))
+        states.addState(intArrayOf(), rounded(base, 10))
         return states
     }
 
@@ -363,8 +383,26 @@ class MainActivity : Activity() {
         button.textSize = 12f
         button.minHeight = dp(34)
         button.minimumHeight = dp(34)
-        button.setPadding(dp(6), dp(4), dp(6), dp(4))
+        button.setPadding(dp(8), dp(4), dp(8), dp(4))
         styleChip(button, selected)
+        button.setOnClickListener { onClick() }
+        return button
+    }
+
+    // A translucent white button for the blue header.
+    private fun ghostChip(label: String, onClick: () -> Unit): Button {
+        val button = Button(this)
+        button.text = label
+        button.textSize = 11f
+        button.minHeight = dp(32)
+        button.minimumHeight = dp(32)
+        button.setPadding(dp(10), dp(2), dp(10), dp(2))
+        button.setTextColor(Color.WHITE)
+        val states = StateListDrawable()
+        states.addState(intArrayOf(android.R.attr.state_focused), rounded(0x66FFFFFF, 16, Color.WHITE, 2))
+        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(0x66FFFFFF, 16, Color.WHITE, 2))
+        states.addState(intArrayOf(), rounded(0x33FFFFFF, 16))
+        button.background = states
         button.setOnClickListener { onClick() }
         return button
     }
@@ -382,7 +420,7 @@ class MainActivity : Activity() {
     private fun card(child: View): LinearLayout {
         val holder = LinearLayout(this)
         holder.orientation = LinearLayout.VERTICAL
-        holder.background = rounded(colCard, 12)
+        holder.background = rounded(colCard, 14, colStroke, 1)
         holder.setPadding(dp(8), dp(6), dp(8), dp(6))
         holder.addView(child, matchWrap())
         return holder
@@ -390,8 +428,50 @@ class MainActivity : Activity() {
 
     private fun cardParams(): LinearLayout.LayoutParams {
         val params = matchWrap()
-        params.setMargins(dp(6), dp(3), dp(6), dp(3))
+        params.setMargins(dp(8), dp(4), dp(8), dp(4))
         return params
+    }
+
+    // A tappable row (focusable with the keypad), highlighted when selected and outlined when focused.
+    private fun rowBackground(selected: Boolean): StateListDrawable {
+        val states = StateListDrawable()
+        states.addState(intArrayOf(android.R.attr.state_focused), rounded(colAccentSoft, 10, colAccent, 2))
+        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(colAccentSoft, 10, colAccent, 2))
+        states.addState(
+            intArrayOf(),
+            if (selected) rounded(colAccentSoft, 10) else ColorDrawable(Color.TRANSPARENT),
+        )
+        return states
+    }
+
+    private fun makeRow(): LinearLayout {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.isFocusable = true
+        row.isClickable = true
+        row.setPadding(dp(8), dp(8), dp(8), dp(8))
+        row.background = rowBackground(false)
+        return row
+    }
+
+    private fun styleRadio(radio: RadioRow, selected: Boolean) {
+        radio.dot.background = if (selected) {
+            ovalDrawable(colAccent, Color.WHITE, 3)
+        } else {
+            ovalDrawable(Color.WHITE, colRadioOff, 2)
+        }
+        radio.label.setTextColor(colText)
+        radio.label.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        radio.root.background = rowBackground(selected)
+    }
+
+    private fun makeSwitch(checked: Boolean): Switch {
+        val toggle = Switch(this)
+        toggle.textOn = ""
+        toggle.textOff = ""
+        toggle.isChecked = checked
+        return toggle
     }
 
     // ---------- Bluetooth enable dialog ----------
@@ -444,15 +524,14 @@ class MainActivity : Activity() {
         }
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
-        val weight = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }
-        buttons.addView(makeButton("סרוק") { startScan() }, weight())
-        buttons.addView(makeButton("רענן") { refreshDeviceList() }, weight())
-        buttons.addView(showAllButton, weight())
+        buttons.addView(makeButton("סרוק") { startScan() }, weightParams())
+        buttons.addView(makeButton("רענן") { refreshDeviceList() }, weightParams())
+        buttons.addView(showAllButton, weightParams())
         buttons.addView(
             makeButton("עדכון") {
                 UpdateManager.showUpdateDialog(this, { disconnect("עדכון") }, { line(it) })
             },
-            weight(),
+            weightParams(),
         )
 
         val list = ListView(this)
@@ -760,6 +839,77 @@ class MainActivity : Activity() {
 
     // ---------- connected screen ----------
 
+    // One battery column: a label with the percentage, and a thin bar under it.
+    private fun batteryBlock(label: String): BatteryBlock {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setPadding(dp(8), dp(2), dp(8), dp(2))
+
+        val top = LinearLayout(this)
+        top.orientation = LinearLayout.HORIZONTAL
+        top.addView(makeText(label, 10f, 0xCCFFFFFF.toInt()), weightParams())
+        val percent = makeText("", 12f, Color.WHITE, true)
+        top.addView(percent, wrapParams())
+        root.addView(top, matchWrap())
+
+        val track = LinearLayout(this)
+        track.orientation = LinearLayout.HORIZONTAL
+        track.background = rounded(0x55FFFFFF, 3)
+        val fill = View(this)
+        val rest = View(this)
+        track.addView(fill, LinearLayout.LayoutParams(0, dp(5), 0f))
+        track.addView(rest, LinearLayout.LayoutParams(0, dp(5), 100f))
+        val trackParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(5))
+        trackParams.topMargin = dp(2)
+        root.addView(track, trackParams)
+        return BatteryBlock(root, percent, fill, rest)
+    }
+
+    private fun setBattery(block: BatteryBlock?, value: String?) {
+        if (block == null) return
+        if (value == null) {
+            block.root.visibility = View.INVISIBLE
+            return
+        }
+        block.root.visibility = View.VISIBLE
+        val percent = (Regex("\\d+").find(value)?.value?.toIntOrNull() ?: 0).coerceIn(0, 100)
+        block.percent.text = value
+        block.fill.background = rounded(if (percent < 20) colBadLight else colGoodLight, 3)
+        (block.fill.layoutParams as LinearLayout.LayoutParams).weight = percent.toFloat()
+        (block.rest.layoutParams as LinearLayout.LayoutParams).weight = (100 - percent).toFloat()
+        block.fill.requestLayout()
+        block.rest.requestLayout()
+    }
+
+    private fun makeTab(label: String, onClick: () -> Unit): TabItem {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        val button = Button(this)
+        button.text = label
+        button.textSize = 12f
+        button.minHeight = dp(34)
+        button.minimumHeight = dp(34)
+        button.setPadding(dp(2), dp(4), dp(2), dp(4))
+        val states = StateListDrawable()
+        states.addState(intArrayOf(android.R.attr.state_focused), rounded(colAccentSoft, 10, colAccent, 2))
+        states.addState(intArrayOf(android.R.attr.state_pressed), rounded(colAccentSoft, 10, colAccent, 2))
+        states.addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+        button.background = states
+        button.setOnClickListener { onClick() }
+        val underline = View(this)
+        root.addView(button, matchWrap())
+        val lineParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3))
+        lineParams.setMargins(dp(10), 0, dp(10), 0)
+        root.addView(underline, lineParams)
+        return TabItem(root, button, underline)
+    }
+
+    private fun styleTab(tab: TabItem, selected: Boolean) {
+        tab.button.setTextColor(if (selected) colAccentDark else colSubText)
+        tab.button.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        tab.underline.setBackgroundColor(if (selected) colAccent else Color.TRANSPARENT)
+    }
+
     private fun showConnectedScreen(mac: String) {
         currentScreen = Screen.CONNECTED
         currentMac = mac
@@ -770,61 +920,69 @@ class MainActivity : Activity() {
         lastRefreshError = ""
         reportedUntranslated = 0
         pages.clear()
-        tabButtons.clear()
+        tabItems.clear()
+        batteryBlocks.clear()
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(colBg)
         rtl(root)
 
-        // Header: back, device name, reconnect.
+        // Header: a blue banner with back, device name, reconnect and the three batteries.
         val header = LinearLayout(this)
-        header.orientation = LinearLayout.HORIZONTAL
-        header.gravity = Gravity.CENTER_VERTICAL
-        header.setPadding(dp(4), dp(4), dp(4), 0)
-        header.addView(
-            chip("חזרה", false) { onBackPressed() },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
+        header.orientation = LinearLayout.VERTICAL
+        val gradient = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(colAccent, colAccentDark))
+        val radius = dp(20).toFloat()
+        gradient.cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, radius, radius, radius, radius)
+        header.background = gradient
+        header.setPadding(dp(8), dp(8), dp(8), dp(10))
+
+        val topRow = LinearLayout(this)
+        topRow.orientation = LinearLayout.HORIZONTAL
+        topRow.gravity = Gravity.CENTER_VERTICAL
+        topRow.addView(ghostChip("חזרה") { onBackPressed() }, wrapParams())
         val deviceName = bondedRows.firstOrNull { it.mac.equals(mac, ignoreCase = true) }?.name ?: mac
-        val title = makeText(deviceName, 15f, colText, true)
+        val title = makeText(deviceName, 16f, Color.WHITE, true)
         title.gravity = Gravity.CENTER
         titleView = title
-        header.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        header.addView(
-            chip("חיבור מחדש", false) { startConnection(currentMac) },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
-        root.addView(header, matchWrap())
+        topRow.addView(title, weightParams())
+        topRow.addView(ghostChip("חיבור מחדש") { startConnection(currentMac) }, wrapParams())
+        header.addView(topRow, matchWrap())
 
-        // Battery line and a one line status (the last log message).
-        val battery = makeText("", 12f, colSubText)
-        battery.gravity = Gravity.CENTER
-        batteryView = battery
-        root.addView(battery, matchWrap())
-        val miniLog = makeText("", 10f, colSubText)
+        val batteryRow = LinearLayout(this)
+        batteryRow.orientation = LinearLayout.HORIZONTAL
+        batteryRow.setPadding(0, dp(6), 0, 0)
+        listOf("right" to "ימין", "left" to "שמאל", "case" to "מארז").forEach { (id, label) ->
+            val block = batteryBlock(label)
+            block.root.visibility = View.INVISIBLE
+            batteryBlocks[id] = block
+            batteryRow.addView(block.root, weightParams())
+        }
+        header.addView(batteryRow, matchWrap())
+
+        val miniLog = makeText("", 10f, 0xCCFFFFFF.toInt())
         miniLog.gravity = Gravity.CENTER
         miniLog.maxLines = 2
         miniStatus = miniLog
-        root.addView(miniLog, matchWrap())
+        header.addView(miniLog, matchWrap())
+        root.addView(header, matchWrap())
 
         // Tabs. Keys 1-4 switch between them.
         val tabs = LinearLayout(this)
         tabs.orientation = LinearLayout.HORIZONTAL
-        tabs.setPadding(dp(4), 0, dp(4), dp(4))
+        tabs.setBackgroundColor(colCard)
+        tabs.setPadding(dp(4), dp(2), dp(4), 0)
         pageTitles.forEachIndexed { index, label ->
-            val tab = chip(label, index == 0) { showPage(index) }
-            tab.textSize = 11f
-            tabButtons.add(tab)
-            val params = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            params.setMargins(dp(2), 0, dp(2), 0)
-            tabs.addView(tab, params)
+            val tab = makeTab(label) { showPage(index) }
+            tabItems.add(tab)
+            tabs.addView(tab.root, weightParams())
         }
         root.addView(tabs, matchWrap())
 
         // Pages.
         val content = LinearLayout(this)
         content.orientation = LinearLayout.VERTICAL
+        content.setPadding(0, dp(4), 0, dp(16))
         pageTitles.forEach { _ ->
             val page = LinearLayout(this)
             page.orientation = LinearLayout.VERTICAL
@@ -841,11 +999,10 @@ class MainActivity : Activity() {
         val leftChip = chip("אוזנית שמאל", true) { showSide(0) }
         sideRightButton = rightChip
         sideLeftButton = leftChip
-        val sideParams = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }
-        val rightParams = sideParams()
-        rightParams.setMargins(dp(6), dp(4), dp(3), dp(4))
-        val leftParams = sideParams()
-        leftParams.setMargins(dp(3), dp(4), dp(6), dp(4))
+        val rightParams = weightParams()
+        rightParams.setMargins(dp(8), dp(4), dp(3), dp(4))
+        val leftParams = weightParams()
+        leftParams.setMargins(dp(3), dp(4), dp(8), dp(4))
         sideRow.addView(rightChip, rightParams)
         sideRow.addView(leftChip, leftParams)
         buttonsPage.addView(sideRow, matchWrap())
@@ -887,7 +1044,7 @@ class MainActivity : Activity() {
 
     private fun showPage(index: Int) {
         pages.forEachIndexed { i, page -> page.visibility = if (i == index) View.VISIBLE else View.GONE }
-        tabButtons.forEachIndexed { i, tab -> styleChip(tab, i == index) }
+        tabItems.forEachIndexed { i, tab -> styleTab(tab, i == index) }
         scrollViewMain?.scrollTo(0, 0)
     }
 
@@ -944,7 +1101,17 @@ class MainActivity : Activity() {
             if (section == null) {
                 section = LinearLayout(this)
                 section.orientation = LinearLayout.VERTICAL
-                section.addView(makeText(settingName(category), 13f, colSubText, true))
+                val head = LinearLayout(this)
+                head.orientation = LinearLayout.HORIZONTAL
+                head.gravity = Gravity.CENTER_VERTICAL
+                head.setPadding(dp(12), dp(10), dp(12), dp(2))
+                val bar = View(this)
+                bar.background = rounded(colAccent, 2)
+                val barParams = LinearLayout.LayoutParams(dp(4), dp(14))
+                barParams.marginEnd = dp(6)
+                head.addView(bar, barParams)
+                head.addView(makeText(settingName(category), 13f, colText, true), wrapParams())
+                section.addView(head, matchWrap())
                 container.addView(section, matchWrap())
                 sections[category] = section
             }
@@ -954,9 +1121,8 @@ class MainActivity : Activity() {
         pages.getOrNull(page)?.addView(holder, cardParams())
     }
 
-    // Shows the battery of the left earbud, the right earbud and the case at the top of the screen.
+    // Shows the battery of the left earbud, the right earbud and the case in the header.
     private fun updateBattery(items: List<SettingItem>) {
-        val view = batteryView ?: return
         var left: String? = null
         var right: String? = null
         var caseValue: String? = null
@@ -971,21 +1137,9 @@ class MainActivity : Activity() {
                 k.contains("right") -> right = setting.translatedValue
             }
         }
-        val text = SpannableStringBuilder()
-        fun add(label: String, value: String?) {
-            if (value == null) return
-            if (text.length > 0) text.append("   ")
-            text.append(label).append(" ")
-            val start = text.length
-            text.append(value)
-            val percent = Regex("\\d+").find(value)?.value?.toIntOrNull()
-            val color = if (percent != null && percent < 20) colBad else colGood
-            text.setSpan(ForegroundColorSpan(color), start, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-        add("ימין", right)
-        add("שמאל", left)
-        add("מארז", caseValue)
-        view.text = text
+        setBattery(batteryBlocks["right"], right)
+        setBattery(batteryBlocks["left"], left)
+        setBattery(batteryBlocks["case"], caseValue)
     }
 
     // ---------- connect / disconnect ----------
@@ -1155,7 +1309,7 @@ class MainActivity : Activity() {
         updateBattery(items)
         for (item in items) {
             val setting = item.setting ?: continue
-            // The battery levels are shown at the top of the screen, not as controls.
+            // The battery levels are shown in the header, not as controls.
             if (setting is Setting.InformationSetting && item.key.lowercase(Locale.US).contains("battery")) continue
             // The same id can appear in two categories, so the control is identified by both.
             val id = "${item.category}/${item.key}"
@@ -1226,18 +1380,27 @@ class MainActivity : Activity() {
         }
     }
 
+    // Read-only information: the name on one side and the value on the other.
     private fun infoControl(key: String, initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
-        val view = makeText("${settingName(key)}: $initial", 12f, colText)
-        return Pair(view, { s -> view.text = "${settingName(key)}: ${textOf(s)}" })
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(dp(4), dp(4), dp(4), dp(4))
+        val name = makeText(settingName(key), 12f, colSubText)
+        val value = makeText(initial, 12f, colText, true)
+        row.addView(name, weightParams())
+        row.addView(value, wrapParams())
+        return Pair(row, { s -> value.text = textOf(s) })
     }
 
     private fun toggleControl(device: Any, key: String, setting: Setting.ToggleSetting): Pair<View, (Any?) -> Unit> {
-        val box = CheckBox(this)
-        box.text = settingName(key)
-        box.textSize = 13f
-        box.setTextColor(colText)
-        box.isChecked = setting.value
-        box.setOnCheckedChangeListener { _, checked ->
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(dp(4), dp(2), dp(4), dp(2))
+        val name = makeText(settingName(key), 13f, colText)
+        val toggle = makeSwitch(setting.value)
+        toggle.setOnCheckedChangeListener { _, checked ->
             if (!updatingUi) {
                 sendValue(
                     device,
@@ -1247,16 +1410,21 @@ class MainActivity : Activity() {
                 )
             }
         }
+        row.addView(name, weightParams())
+        row.addView(toggle, wrapParams())
+        // Tapping the name toggles the switch too.
+        row.isClickable = true
+        row.setOnClickListener { toggle.toggle() }
         val updater: (Any?) -> Unit = { s ->
-            if (s is Setting.ToggleSetting) box.isChecked = s.value
+            if (s is Setting.ToggleSetting) toggle.isChecked = s.value
         }
-        return Pair(box, updater)
+        return Pair(row, updater)
     }
 
     // A button that runs a one-time action (for example resetting the earbud buttons), after a confirmation.
     // The core does not say which value an Action expects, so true is sent. If it does not work, the log shows why.
     private fun actionControl(device: Any, key: String): Pair<View, (Any?) -> Unit> {
-        val button = chip(settingName(key), false) {
+        val button = chip(settingName(key), true) {
             AlertDialog.Builder(this)
                 .setTitle(settingName(key))
                 .setMessage("לבצע את הפעולה?")
@@ -1277,7 +1445,7 @@ class MainActivity : Activity() {
         key: String,
         setting: Setting.ImportStringSetting,
     ): Pair<View, (Any?) -> Unit> {
-        val button = chip(settingName(key), false) {
+        val button = chip(settingName(key), true) {
             val input = EditText(this)
             input.hint = "הדבק כאן את הטקסט לייבוא"
             val builder = AlertDialog.Builder(this)
@@ -1352,11 +1520,8 @@ class MainActivity : Activity() {
                         .setNegativeButton("ביטול", null)
                         .show()
                 }
-                row.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                row.addView(
-                    remove,
-                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-                )
+                row.addView(text, weightParams())
+                row.addView(remove, wrapParams())
                 rows.addView(row, matchWrap())
             }
         }
@@ -1377,7 +1542,12 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        val label = makeText("${settingName(key)}: ${setting.value}", 13f, colText, true)
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.HORIZONTAL
+        val name = makeText(settingName(key), 13f, colText)
+        val valueText = makeText("${setting.value}", 13f, colAccentDark, true)
+        head.addView(name, weightParams())
+        head.addView(valueText, wrapParams())
         val bar = SeekBar(this)
         bar.layoutDirection = View.LAYOUT_DIRECTION_LTR
         bar.max = max
@@ -1391,7 +1561,7 @@ class MainActivity : Activity() {
         }
         bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                label.text = "${settingName(key)}: ${start + progress * step}"
+                valueText.text = "${start + progress * step}"
                 if (fromUser && !dragging) {
                     pendingSend?.let { uiHandler.removeCallbacks(it) }
                     pendingSend = sendNow
@@ -1411,12 +1581,12 @@ class MainActivity : Activity() {
                 sendValue(device, key, Value.I32Value(value), "${settingName(key)} = $value")
             }
         })
-        root.addView(label, matchWrap())
+        root.addView(head, matchWrap())
         root.addView(bar, matchWrap())
         val updater: (Any?) -> Unit = { s ->
             if (s is Setting.I32RangeSetting && !dragging && pendingSend == null) {
                 bar.progress = (s.value - start) / step
-                label.text = "${settingName(key)}: ${s.value}"
+                valueText.text = "${s.value}"
             }
         }
         return Pair(root, updater)
@@ -1449,14 +1619,17 @@ class MainActivity : Activity() {
         root.orientation = LinearLayout.VERTICAL
         root.addView(makeText(settingName(key), 13f, colText, true))
 
-        val labels = ArrayList<TextView>()
+        val valueTexts = ArrayList<TextView>()
         val bars = ArrayList<SeekBar>()
 
-        fun labelText(i: Int) =
-            "${eq.bandHz[i]} Hz: " + String.format(Locale.US, "%.1f", values[i] / scale)
+        fun valueText(i: Int) = String.format(Locale.US, "%.1f", values[i] / scale)
 
         for (i in 0 until bandCount) {
-            val label = makeText(labelText(i), 11f, colSubText)
+            val head = LinearLayout(this)
+            head.orientation = LinearLayout.HORIZONTAL
+            head.addView(makeText("${eq.bandHz[i]} Hz", 11f, colSubText), weightParams())
+            val valueView = makeText(valueText(i), 11f, colAccentDark, true)
+            head.addView(valueView, wrapParams())
             val bar = SeekBar(this)
             bar.layoutDirection = View.LAYOUT_DIRECTION_LTR
             bar.max = max - min
@@ -1465,7 +1638,7 @@ class MainActivity : Activity() {
             bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                     values[i] = progress + min
-                    label.text = labelText(i)
+                    valueView.text = valueText(i)
                     if (fromUser && !dragging[i]) {
                         pendingSend?.let { uiHandler.removeCallbacks(it) }
                         pendingSend = sendNow
@@ -1490,9 +1663,9 @@ class MainActivity : Activity() {
                     )
                 }
             })
-            labels.add(label)
+            valueTexts.add(valueView)
             bars.add(bar)
-            root.addView(label, matchWrap())
+            root.addView(head, matchWrap())
             root.addView(bar, matchWrap())
         }
 
@@ -1501,15 +1674,15 @@ class MainActivity : Activity() {
                 for (i in 0 until bandCount) {
                     values[i] = s.value.getOrElse(i) { 0 }.toInt()
                     bars[i].progress = values[i] - min
-                    labels[i].text = labelText(i)
+                    valueTexts[i].text = valueText(i)
                 }
             }
         }
         return Pair(root, updater)
     }
 
-    // A choice between options. A short list is shown as buttons (the chosen one is blue). A long list
-    // (more than 4 entries) is one button that opens a list window, like the original app does.
+    // A choice between options. A short list (up to 4) is shown as rows with a round selector, like the original
+    // app. A long list is one row that shows the current choice and opens a list window.
     // With allowNone, an extra "-" entry selects "no value".
     private fun choiceControl(
         device: Any,
@@ -1528,13 +1701,18 @@ class MainActivity : Activity() {
 
         if (entries.size > 4) {
             var current: String? = null
-            val button = chip("", false) {}
+            val row = makeRow()
+            val name = makeText(settingName(key), 13f, colText)
+            val value = makeText("-", 12f, colAccentDark, true)
+            val arrow = makeText("‹", 18f, colSubText)
+            row.addView(name, weightParams())
+            row.addView(value, wrapParams())
+            row.addView(arrow, wrapParams())
             fun refresh() {
-                val label = entries.firstOrNull { it.first == current }?.second ?: "-"
-                button.text = "${settingName(key)}: $label"
+                value.text = entries.firstOrNull { it.first == current }?.second ?: "-"
             }
             refresh()
-            button.setOnClickListener {
+            row.setOnClickListener {
                 val items: Array<CharSequence> = entries.map { it.second as CharSequence }.toTypedArray()
                 val checked = entries.indexOfFirst { it.first == current }
                 AlertDialog.Builder(this)
@@ -1553,33 +1731,35 @@ class MainActivity : Activity() {
                 current = currentOf(s)
                 refresh()
             }
-            return Pair(button, updater)
+            return Pair(row, updater)
         }
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.addView(makeText(settingName(key), 13f, colText, true))
+        root.addView(makeText(settingName(key), 13f, colSubText, true))
 
-        val choiceButtons = ArrayList<ChoiceButton>()
+        val radios = ArrayList<RadioRow>()
         fun highlight(current: String?) {
-            choiceButtons.forEach { styleChip(it.button, it.option == current) }
+            radios.forEach { styleRadio(it, it.option == current) }
         }
 
-        entries.chunked(2).forEach { chunk ->
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            chunk.forEach { (option, label) ->
-                val button = chip(label, false) {
-                    if (!updatingUi) {
-                        sendValue(device, key, makeValue(option), "${settingName(key)} = $label")
-                        highlight(option)
-                    }
+        entries.forEach { (option, label) ->
+            val row = makeRow()
+            val dot = View(this)
+            val text = makeText(label, 13f, colText)
+            val dotParams = LinearLayout.LayoutParams(dp(18), dp(18))
+            dotParams.marginEnd = dp(8)
+            row.addView(dot, dotParams)
+            row.addView(text, weightParams())
+            val radio = RadioRow(option, row, dot, text)
+            row.setOnClickListener {
+                if (!updatingUi) {
+                    sendValue(device, key, makeValue(option), "${settingName(key)} = $label")
+                    highlight(option)
                 }
-                val params = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                params.setMargins(dp(2), dp(2), dp(2), dp(2))
-                row.addView(button, params)
-                choiceButtons.add(ChoiceButton(option, label, button))
             }
+            radios.add(radio)
+            styleRadio(radio, false)
             root.addView(row, matchWrap())
         }
 
@@ -1596,27 +1776,29 @@ class MainActivity : Activity() {
         root.orientation = LinearLayout.VERTICAL
         root.addView(makeText(settingName(key), 13f, colText, true))
 
-        val boxes = ArrayList<Pair<String, CheckBox>>()
+        val switches = ArrayList<Pair<String, Switch>>()
         val options = setting.setting.options
         val labels = setting.setting.localizedOptions
         options.forEachIndexed { i, option ->
-            val box = CheckBox(this)
-            box.text = optionText(option, labels.getOrElse(i) { option })
-            box.textSize = 12f
-            box.setTextColor(colText)
-            box.isChecked = option in setting.values
-            box.setOnCheckedChangeListener { _, _ ->
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            val name = makeText(optionText(option, labels.getOrElse(i) { option }), 12f, colText)
+            val toggle = makeSwitch(option in setting.values)
+            toggle.setOnCheckedChangeListener { _, _ ->
                 if (!updatingUi) {
-                    val selected = boxes.filter { it.second.isChecked }.map { it.first }
+                    val selected = switches.filter { it.second.isChecked }.map { it.first }
                     sendValue(device, key, Value.StringVecValue(selected), "${settingName(key)} עודכן")
                 }
             }
-            boxes.add(Pair(option, box))
-            root.addView(box)
+            switches.add(Pair(option, toggle))
+            row.addView(name, weightParams())
+            row.addView(toggle, wrapParams())
+            root.addView(row, matchWrap())
         }
         val updater: (Any?) -> Unit = { s ->
             if (s is Setting.MultiSelectSetting) {
-                boxes.forEach { it.second.isChecked = it.first in s.values }
+                switches.forEach { it.second.isChecked = it.first in s.values }
             }
         }
         return Pair(root, updater)
@@ -1636,7 +1818,7 @@ class MainActivity : Activity() {
         registerReceiver(scanReceiver, filter)
 
         showList()
-        line("גרסה: v10-ממשק")
+        line("גרסה: v11-עיצוב חי")
         line("גרסת אנדרואיד (SDK): ${Build.VERSION.SDK_INT}")
 
         try {
