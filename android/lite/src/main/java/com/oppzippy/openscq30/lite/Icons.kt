@@ -127,11 +127,10 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
     }
 }
 
-// A simple picture of the charging case in the middle, the left earbud on its left and the right earbud on its
-// right, tilted outwards, on a pale circle (our own drawing, not the official image). The sides are the sides
-// as seen on the screen, so "right" is the right earbud.
+// The earbuds picture on a pale circle, like the original app. The picture itself is in EarbudsImage.kt. If it
+// cannot be decoded, a simple drawing of a case with two earbuds is shown instead.
 class EarbudsView(context: Context, private val soft: Int, private val accent: Int) : View(context) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val rect = RectF()
     private val caseBase = 0xFF8DB4E6.toInt()
     private val caseLid = 0xFFB4D0F2.toInt()
@@ -140,15 +139,30 @@ class EarbudsView(context: Context, private val soft: Int, private val accent: I
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        // The drawing is a bit wider than tall, so the scale follows the smaller of the two limits.
+
+        // The pale circle behind the picture.
+        paint.style = Paint.Style.FILL
+        paint.color = soft
+        canvas.drawCircle(w / 2f, h / 2f, min(w, h) / 2f * 0.95f, paint)
+
+        val picture = EarbudsImage.bitmap()
+        if (picture != null) {
+            // Fit the picture inside the view, keeping its proportions, a little smaller than the view.
+            val scale = min(w / picture.width, h / picture.height) * 0.96f
+            val pw = picture.width * scale
+            val ph = picture.height * scale
+            val left = (w - pw) / 2f
+            val top = (h - ph) / 2f
+            rect.set(left, top, left + pw, top + ph)
+            paint.color = Color.WHITE
+            canvas.drawBitmap(picture, null, rect, paint)
+            return
+        }
+
+        // Fallback drawing: the case in the middle and an earbud on each side.
         val s = min(h, w / 1.3f)
         canvas.save()
         canvas.translate(w / 2f, h / 2f)
-
-        paint.style = Paint.Style.FILL
-        paint.color = soft
-        canvas.drawCircle(0f, 0f, s / 2f, paint)
-
         drawCase(canvas, s)
         drawBud(canvas, s, -1)
         drawBud(canvas, s, 1)
