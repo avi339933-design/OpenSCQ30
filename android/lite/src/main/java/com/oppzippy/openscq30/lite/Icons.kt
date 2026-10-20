@@ -1,8 +1,7 @@
 package com.oppzippy.openscq30.lite
-
+ 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -10,26 +9,29 @@ import android.view.View
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
-
-enum class IconKind { BACK, REFRESH, GEAR, SOUND, EQUALIZER, TOUCH, GAUGE }
-
+ 
+enum class IconKind {
+    BACK, CHEVRON, CHECK, CHECK_SMALL, GEAR, SOUND, EQUALIZER, TOUCH, GAUGE, BELL, HEADSET,
+    PLUS, PLANET, PERSON, DEVICES, RESET, DOT1, DOT2, DOT3, LINE, SLIDE
+}
+ 
 // Simple icons drawn in code (the lite app has no image resources). Everything is drawn in a 24x24 space.
 class IconView(context: Context, private val kind: IconKind, tint: Int) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val rect = RectF()
     private var color = tint
-
+ 
     fun setTint(value: Int) {
         color = value
         invalidate()
     }
-
+ 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val size = (24 * resources.displayMetrics.density + 0.5f).toInt()
         setMeasuredDimension(resolveSize(size, widthMeasureSpec), resolveSize(size, heightMeasureSpec))
     }
-
+ 
     override fun onDraw(canvas: Canvas) {
         val unit = min(width, height) / 24f
         if (unit <= 0f) return
@@ -43,38 +45,69 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
         paint.strokeJoin = Paint.Join.ROUND
         when (kind) {
             IconKind.BACK -> drawBack(canvas)
-            IconKind.REFRESH -> drawRefresh(canvas)
+            IconKind.CHEVRON -> drawChevron(canvas)
+            IconKind.CHECK -> drawCheck(canvas)
+            IconKind.CHECK_SMALL -> drawCheckSmall(canvas)
             IconKind.GEAR -> drawGear(canvas)
             IconKind.SOUND -> drawSound(canvas)
             IconKind.EQUALIZER -> drawEqualizer(canvas)
             IconKind.TOUCH -> drawTouch(canvas)
             IconKind.GAUGE -> drawGauge(canvas)
+            IconKind.BELL -> drawBell(canvas)
+            IconKind.HEADSET -> drawHeadset(canvas)
+            IconKind.PLUS -> drawPlus(canvas)
+            IconKind.PLANET -> drawPlanet(canvas)
+            IconKind.PERSON -> drawPerson(canvas)
+            IconKind.DEVICES -> drawDevices(canvas)
+            IconKind.RESET -> drawReset(canvas)
+            IconKind.DOT1 -> drawDots(canvas, floatArrayOf(12f), 2.6f)
+            IconKind.DOT2 -> drawDots(canvas, floatArrayOf(8f, 16f), 2.4f)
+            IconKind.DOT3 -> drawDots(canvas, floatArrayOf(5f, 12f, 19f), 2.2f)
+            IconKind.LINE -> drawBar(canvas, 3f, 10.5f, 21f, 13.5f)
+            IconKind.SLIDE -> drawBar(canvas, 10.5f, 3f, 13.5f, 21f)
         }
         canvas.restore()
     }
-
-    // The screen is right-to-left, so "back" points to the right.
+ 
+    // Points to the left (the top bar of the device screen is left-to-right, like the original app).
     private fun drawBack(canvas: Canvas) {
         paint.strokeWidth = 2.4f
         path.reset()
-        path.moveTo(9f, 5f)
-        path.lineTo(16f, 12f)
-        path.lineTo(9f, 19f)
+        path.moveTo(15f, 5f)
+        path.lineTo(8f, 12f)
+        path.lineTo(15f, 19f)
         canvas.drawPath(path, paint)
     }
-
-    private fun drawRefresh(canvas: Canvas) {
-        rect.set(5f, 5f, 19f, 19f)
-        canvas.drawArc(rect, 30f, 290f, false, paint)
-        paint.style = Paint.Style.FILL
+ 
+    // A small arrow for rows. Points to the left, because the text of the rows is right-to-left.
+    private fun drawChevron(canvas: Canvas) {
+        paint.strokeWidth = 2.4f
         path.reset()
-        path.moveTo(15.06f, 9.43f)
-        path.lineTo(19.93f, 10.56f)
-        path.lineTo(19.66f, 5.57f)
-        path.close()
+        path.moveTo(14f, 6f)
+        path.lineTo(8f, 12f)
+        path.lineTo(14f, 18f)
         canvas.drawPath(path, paint)
     }
-
+ 
+    private fun drawCheck(canvas: Canvas) {
+        paint.strokeWidth = 2.6f
+        path.reset()
+        path.moveTo(5f, 12.5f)
+        path.lineTo(10f, 17.5f)
+        path.lineTo(19f, 7f)
+        canvas.drawPath(path, paint)
+    }
+ 
+    // A check mark that fits inside a small circle.
+    private fun drawCheckSmall(canvas: Canvas) {
+        paint.strokeWidth = 3f
+        path.reset()
+        path.moveTo(7f, 12.5f)
+        path.lineTo(10.5f, 16f)
+        path.lineTo(17f, 8.5f)
+        canvas.drawPath(path, paint)
+    }
+ 
     private fun drawGear(canvas: Canvas) {
         paint.strokeWidth = 3.2f
         paint.strokeCap = Paint.Cap.BUTT
@@ -88,7 +121,7 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
         canvas.drawCircle(12f, 12f, 6.5f, paint)
         canvas.drawCircle(12f, 12f, 2.6f, paint)
     }
-
+ 
     private fun drawSound(canvas: Canvas) {
         paint.strokeWidth = 2.4f
         val xs = floatArrayOf(4f, 8f, 12f, 16f, 20f)
@@ -97,7 +130,7 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
             canvas.drawLine(xs[i], 12f - hs[i], xs[i], 12f + hs[i], paint)
         }
     }
-
+ 
     private fun drawEqualizer(canvas: Canvas) {
         val xs = floatArrayOf(6f, 12f, 18f)
         val ys = floatArrayOf(14f, 8f, 15f)
@@ -109,14 +142,14 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
             canvas.drawCircle(xs[i], ys[i], 2.8f, paint)
         }
     }
-
+ 
     private fun drawTouch(canvas: Canvas) {
         rect.set(9f, 3f, 14f, 14f)
         canvas.drawRoundRect(rect, 2.5f, 2.5f, paint)
         rect.set(5.5f, 11f, 19f, 21.5f)
         canvas.drawRoundRect(rect, 4f, 4f, paint)
     }
-
+ 
     // A pressure gauge: an open arc with a needle.
     private fun drawGauge(canvas: Canvas) {
         rect.set(3f, 3f, 21f, 21f)
@@ -125,94 +158,87 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
         paint.style = Paint.Style.FILL
         canvas.drawCircle(12f, 13f, 1.6f, paint)
     }
-}
-
-// The earbuds picture on a pale circle, like the original app. The picture itself is in EarbudsImage.kt. If it
-// cannot be decoded, a simple drawing of a case with two earbuds is shown instead.
-class EarbudsView(context: Context, private val soft: Int, private val accent: Int) : View(context) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val rect = RectF()
-    private val caseBase = 0xFF8DB4E6.toInt()
-    private val caseLid = 0xFFB4D0F2.toInt()
-
-    override fun onDraw(canvas: Canvas) {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        if (w <= 0f || h <= 0f) return
-
-        // The pale circle behind the picture.
+ 
+    private fun drawBell(canvas: Canvas) {
+        paint.strokeWidth = 1.8f
+        rect.set(6f, 3.5f, 18f, 15.5f)
+        canvas.drawArc(rect, 180f, 180f, false, paint)
+        canvas.drawLine(6f, 9.5f, 4.5f, 17f, paint)
+        canvas.drawLine(18f, 9.5f, 19.5f, 17f, paint)
+        canvas.drawLine(4.5f, 17f, 19.5f, 17f, paint)
+        rect.set(10f, 18f, 14f, 22f)
+        canvas.drawArc(rect, 0f, 180f, false, paint)
+    }
+ 
+    private fun drawHeadset(canvas: Canvas) {
+        paint.strokeWidth = 1.8f
+        rect.set(4f, 4f, 20f, 20f)
+        canvas.drawArc(rect, 180f, 180f, false, paint)
+        rect.set(3f, 12f, 7f, 18f)
+        canvas.drawRoundRect(rect, 2f, 2f, paint)
+        rect.set(17f, 12f, 21f, 18f)
+        canvas.drawRoundRect(rect, 2f, 2f, paint)
+        canvas.drawLine(19f, 18f, 19f, 20f, paint)
+        canvas.drawLine(19f, 20f, 14f, 20f, paint)
+    }
+ 
+    private fun drawPlus(canvas: Canvas) {
+        paint.strokeWidth = 2f
+        canvas.drawLine(12f, 5f, 12f, 19f, paint)
+        canvas.drawLine(5f, 12f, 19f, 12f, paint)
+    }
+ 
+    private fun drawPlanet(canvas: Canvas) {
+        paint.strokeWidth = 2f
+        canvas.drawCircle(12f, 12f, 5.5f, paint)
+        canvas.save()
+        canvas.rotate(-20f, 12f, 12f)
+        rect.set(2f, 8.5f, 22f, 15.5f)
+        canvas.drawOval(rect, paint)
+        canvas.restore()
+    }
+ 
+    private fun drawPerson(canvas: Canvas) {
         paint.style = Paint.Style.FILL
-        paint.color = soft
-        canvas.drawCircle(w / 2f, h / 2f, min(w, h) / 2f * 0.95f, paint)
-
-        val picture = EarbudsImage.bitmap()
-        if (picture != null) {
-            // Fit the picture inside the view, keeping its proportions, a little smaller than the view.
-            val scale = min(w / picture.width, h / picture.height) * 0.96f
-            val pw = picture.width * scale
-            val ph = picture.height * scale
-            val left = (w - pw) / 2f
-            val top = (h - ph) / 2f
-            rect.set(left, top, left + pw, top + ph)
-            paint.color = Color.WHITE
-            canvas.drawBitmap(picture, null, rect, paint)
-            return
+        canvas.drawCircle(12f, 8f, 4f, paint)
+        rect.set(4f, 14f, 20f, 30f)
+        canvas.drawArc(rect, 180f, 180f, true, paint)
+    }
+ 
+    // A stylized "d" like the Soundcore logo.
+    private fun drawDevices(canvas: Canvas) {
+        paint.strokeWidth = 2.8f
+        canvas.drawCircle(10f, 14f, 5f, paint)
+        canvas.drawLine(15f, 4f, 15f, 19f, paint)
+    }
+ 
+    private fun drawReset(canvas: Canvas) {
+        rect.set(5f, 5f, 19f, 19f)
+        canvas.drawArc(rect, 30f, 290f, false, paint)
+        paint.style = Paint.Style.FILL
+        path.reset()
+        path.moveTo(15.06f, 9.43f)
+        path.lineTo(19.93f, 10.56f)
+        path.lineTo(19.66f, 5.57f)
+        path.close()
+        canvas.drawPath(path, paint)
+    }
+ 
+    private fun drawDots(canvas: Canvas, xs: FloatArray, radius: Float) {
+        paint.style = Paint.Style.FILL
+        for (x in xs) {
+            canvas.drawCircle(x, 12f, radius, paint)
         }
-
-        // Fallback drawing: the case in the middle and an earbud on each side.
-        val s = min(h, w / 1.3f)
-        canvas.save()
-        canvas.translate(w / 2f, h / 2f)
-        drawCase(canvas, s)
-        drawBud(canvas, s, -1)
-        drawBud(canvas, s, 1)
-        canvas.restore()
     }
-
-    private fun drawCase(canvas: Canvas, s: Float) {
-        // The open lid, behind the base.
-        rect.set(-0.19f * s, -0.2f * s, 0.19f * s, 0.05f * s)
+ 
+    private fun drawBar(canvas: Canvas, left: Float, top: Float, right: Float, bottom: Float) {
         paint.style = Paint.Style.FILL
-        paint.color = caseLid
-        canvas.drawRoundRect(rect, 0.1f * s, 0.1f * s, paint)
-
-        // The base of the case.
-        rect.set(-0.23f * s, -0.02f * s, 0.23f * s, 0.28f * s)
-        paint.color = caseBase
-        canvas.drawRoundRect(rect, 0.1f * s, 0.1f * s, paint)
-
-        // A small round logo on the front.
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = resources.displayMetrics.density * 1.2f
-        paint.color = Color.WHITE
-        canvas.drawCircle(0f, 0.14f * s, 0.04f * s, paint)
-    }
-
-    // side: -1 = left earbud (on the left of the case), 1 = right earbud (on the right of the case).
-    private fun drawBud(canvas: Canvas, s: Float, side: Int) {
-        val stroke = resources.displayMetrics.density * 1.5f
-        canvas.save()
-        canvas.translate(side * 0.38f * s, -0.02f * s)
-        canvas.rotate(side * 14f)
-
-        // The stem.
-        rect.set(-0.035f * s, -0.04f * s, 0.035f * s, 0.2f * s)
-        paint.style = Paint.Style.FILL
-        paint.color = Color.WHITE
-        canvas.drawRoundRect(rect, 0.035f * s, 0.035f * s, paint)
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = stroke
-        paint.color = accent
-        canvas.drawRoundRect(rect, 0.035f * s, 0.035f * s, paint)
-
-        // The head.
-        paint.style = Paint.Style.FILL
-        paint.color = Color.WHITE
-        canvas.drawCircle(0f, -0.1f * s, 0.1f * s, paint)
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = stroke
-        paint.color = accent
-        canvas.drawCircle(0f, -0.1f * s, 0.1f * s, paint)
-        canvas.restore()
+        rect.set(left, top, right, bottom)
+        canvas.drawRoundRect(rect, 1.5f, 1.5f, paint)
     }
 }
+ 
+
+
+
+
