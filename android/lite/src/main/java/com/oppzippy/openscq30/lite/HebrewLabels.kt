@@ -1,7 +1,7 @@
 package com.oppzippy.openscq30.lite
-
+ 
 import java.util.Locale
-
+ 
 /**
  * All Hebrew translations of setting names, categories, option labels and values.
  *
@@ -11,7 +11,7 @@ import java.util.Locale
  */
 object HebrewLabels {
     private fun norm(text: String): String = text.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
-
+ 
     private val translations: Map<String, String> = mapOf(
         // categories
         "general" to "כללי",
@@ -88,6 +88,7 @@ object HebrewLabels {
         "easychat" to "שיחה קלה (Easy Chat)",
         "easychatwaittime" to "זמן המתנה של שיחה קלה",
         "soundleakcompensation" to "פיצוי דליפת סאונד",
+        "adaptivesoundleakagecompensation" to "פיצוי דליפת סאונד אדפטיבי",
         "ldac" to "LDAC",
         "caselanguage" to "שפת המארז",
         "exportcustomequalizerprofiles" to "ייצוא פרופילי איקוולייזר מותאמים",
@@ -115,6 +116,7 @@ object HebrewLabels {
         "transparent" to "שקיפות",
         "ambient" to "צליל סביבה",
         "normal" to "רגיל",
+        "none" to "ללא",
         "airplanemode" to "מצב טיסה",
         "adaptive" to "אדפטיבי",
         "manual" to "ידני",
@@ -174,13 +176,13 @@ object HebrewLabels {
         "treblebooster" to "מגביר גבוהים",
         "treblereducer" to "מפחית גבוהים",
     )
-
+ 
     // Option labels that the core gives in their own language (norm() would turn them into an empty key).
     private val nativeNames: Map<String, String> = mapOf(
         "中文" to "סינית",
         "日本語" to "יפנית",
     )
-
+ 
     // Values of information settings (shown after the name, like "אוזנית שמאל נטענת: לא בטעינה").
     private val values: Map<String, String> = mapOf(
         "connected" to "מחובר",
@@ -190,12 +192,12 @@ object HebrewLabels {
         "left" to "שמאל",
         "right" to "ימין",
     )
-
+ 
     // Long and short forms of a time: "15 seconds" / "10s", "1 minute" / "1m", "2 hours" / "2h".
     private val secondsRegex = Regex("^(\\d+)\\s*(?:seconds?|secs?|s)$", RegexOption.IGNORE_CASE)
     private val minutesRegex = Regex("^(\\d+)\\s*(?:minutes?|mins?|m)$", RegexOption.IGNORE_CASE)
     private val hoursRegex = Regex("^(\\d+)\\s*(?:hours?|hrs?|h)$", RegexOption.IGNORE_CASE)
-
+ 
     // "15 seconds" -> "15 שניות", "1 minute" -> "דקה", "30 minutes" -> "30 דקות"
     private fun timeText(text: String): String? {
         val t = text.trim()
@@ -213,10 +215,10 @@ object HebrewLabels {
         }
         return null
     }
-
+ 
     // Name of a setting or a category, or null if there is no translation yet.
     fun name(key: String): String? = translations[norm(key)]
-
+ 
     // Label of an option (a button or a check box), or null if there is no translation yet.
     fun option(option: String, localized: String): String? =
         translations[norm(option)]
@@ -224,7 +226,8 @@ object HebrewLabels {
             ?: nativeNames[localized.trim()]
             ?: timeText(localized)
             ?: timeText(option)
-
+ 
     // A value shown after a setting name; unknown values stay as they are.
     fun value(text: String): String = values[norm(text)] ?: timeText(text) ?: text
 }
+ 
