@@ -114,6 +114,11 @@ class MainActivity : Activity() {
     private var titleView: TextView? = null
     private var gearButton: View? = null
     private var deviceTitle = ""
+    private var moreCategory: String? = null
+    private var ambientBar: AmbientBar? = null
+    private val morePages = HashMap<String, LinearLayout>()
+    private var moreMenuViews: List<View> = emptyList()
+    private var moreMenuCard: LinearLayout? = null
  
     // One entry per setting id: a function that refreshes its control from a new value.
     private val controls = HashMap<String, (Any?) -> Unit>()
@@ -708,6 +713,7 @@ class MainActivity : Activity() {
         loggedSkips.clear()
         lastRefreshError = ""
         reportedUntranslated = 0
+        ambientBar = null
         currentTab = TAB_SOUND
         moreMode = false
         deviceTitle = bondedRows.firstOrNull { it.mac.equals(mac, ignoreCase = true) }?.name ?: ""
@@ -776,10 +782,14 @@ class MainActivity : Activity() {
             containers.add(container)
         }
         tabContainers = containers
-        containers[TAB_MORE].addView(
-            makeButton("התחבר מחדש") { startConnection(currentMac) },
-            UiStyle.cardParams(this),
-        )
+        val menuCard = UiStyle.card(this)
+        val reconnect = makeButton("התחבר מחדש") { startConnection(currentMac) }
+        containers[TAB_MORE].addView(menuCard, UiStyle.cardParams(this))
+        containers[TAB_MORE].addView(reconnect, UiStyle.cardParams(this))
+        moreMenuCard = menuCard
+        moreMenuViews = listOf(menuCard, reconnect)
+        morePages.clear()
+        moreCategory = null
  
         val log = TextView(this)
         log.textSize = 11f
@@ -835,11 +845,40 @@ class MainActivity : Activity() {
         earbudsView?.visibility = if (on) View.GONE else View.VISIBLE
         tabStrip?.visibility = if (on) View.GONE else View.VISIBLE
         gearButton?.visibility = if (on) View.INVISIBLE else View.VISIBLE
-        titleView?.text = if (on) "הגדרות נוספות" else deviceTitle
         tabContainers.forEachIndexed { i, container ->
             val visible = if (on) i == TAB_MORE else i == currentTab
             container.visibility = if (visible) View.VISIBLE else View.GONE
         }
+        if (on) {
+            showMoreMenu()
+        } else {
+            moreCategory = null
+            titleView?.text = deviceTitle
+        }
+    }
+ 
+    // The menu of the "more settings" page: one row per category, like the original app's list.
+    private fun showMoreMenu() {
+        moreCategory = null
+        titleView?.text = "הגדרות נוספות"
+        moreMenuViews.forEach { it.visibility = View.VISIBLE }
+        morePages.values.forEach { it.visibility = View.GONE }
+    }
+ 
+    // One category of the "more settings" page, shown alone.
+    private fun openMorePage(category: String) {
+        moreCategory = category
+        titleView?.text = settingName(category)
+        moreMenuViews.forEach { it.visibility = View.GONE }
+        morePages.forEach { (name, page) -> page.visibility = if (name == category) View.VISIBLE else View.GONE }
+    }
+ 
+    private fun addMoreMenuRow(category: String) {
+        val menu = moreMenuCard ?: return
+        if (menu.childCount > 0) menu.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
+        val rowViews = UiStyle.row(this, settingName(category)) { openMorePage(category) }
+        rowViews.value.visibility = View.GONE
+        menu.addView(rowViews.root, matchWrap())
     }
  
     // Which tab a settings category belongs to; everything else goes to the "more settings" page.
@@ -1037,6 +1076,21 @@ class MainActivity : Activity() {
     // Every setting returned by the core gets a control matching its type. Changing a control sends the new
     // value with device.setSettingValues(listOf(SettingIdValuePair(id, value))).
  
+    private fun keyNorm(text: String): String = text.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
+ 
+    // Sends several settings in one call, in the given order.
+    private fun sendValues(device: Any, pairs: List<SettingIdValuePair>, description: String) {
+        scope.launch {
+            try {
+                (device as OpenScq30Device).setSettingValues(pairs)
+                line("נשלח: $description")
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                line("השליחה נכשלה:\n" + describe(t))
+            }
+        }
+    }
+ 
     private fun sendValue(device: Any, key: String, value: Value, description: String) {
         scope.launch {
             try {
@@ -1049,14 +1103,26 @@ class MainActivity : Activity() {
         }
     }
  
-    // The card of a settings category (created together with its small gray header, in the category's tab).
+    // The card of a settings category. Categories of the tabs get a small gray header; every other category becomes
+    // its own page behind a row in the "more settings" menu.
     private fun sectionCard(category: String): LinearLayout {
         val existing = sections[category]
         if (existing != null) return existing
-        val container = tabContainers[tabFor(category)]
-        container.addView(UiStyle.sectionHeader(this, settingName(category)), matchWrap())
+        val tab = tabFor(category)
         val card = UiStyle.card(this)
-        container.addView(card, UiStyle.cardParams(this))
+        if (tab == TAB_MORE) {
+            val page = LinearLayout(this)
+            page.orientation = LinearLayout.VERTICAL
+            page.visibility = View.GONE
+            page.addView(card, UiStyle.cardParams(this))
+            tabContainers[TAB_MORE].addView(page, matchWrap())
+            morePages[category] = page
+            addMoreMenuRow(category)
+        } else {
+            val container = tabContainers[tab]
+            container.addView(UiStyle.sectionHeader(this, settingName(category)), matchWrap())
+            container.addView(card, UiStyle.cardParams(this))
+        }
         sections[category] = card
         return card
     }
@@ -1064,7 +1130,9 @@ class MainActivity : Activity() {
     private fun syncSettings(device: Any, items: List<SettingItem>) {
         if (tabContainers.isEmpty() || currentScreen != Screen.CONNECTED) return
         updateEarbuds(items)
+        updateAmbientBar(device, items)
         for (item in items) {
+            if (ambientBar != null && keyNorm(item.key) in ambientKeys) continue
             val setting = item.setting ?: continue
             var updater = controls[item.key]
             if (updater == null) {
@@ -1408,6 +1476,118 @@ class MainActivity : Activity() {
         return Pair(root, updater)
     }
  
+    // ---------- ambient sound bar ----------
+ 
+    private val ambientKeys = setOf("ambientsoundmode", "manualnoisecanceling", "manualnoisecancelling", "manualtransparency")
+ 
+    // The original app's single bar for ambient sound, made from three settings: the mode and the two level settings.
+    // Left: transparency (the far left is the strongest). Middle: normal. Right: noise canceling (the far right,
+    // 10, is the strongest). Choosing a segment sends the mode and the level together.
+    private inner class AmbientBar(
+        private val device: Any,
+        private val modeKey: String,
+        private val ancKey: String,
+        private val transKey: String?,
+        mode: Setting.SelectSetting,
+        anc: Setting.I32RangeSetting,
+        trans: Setting.I32RangeSetting?,
+    ) {
+        private val modeOptions: List<String> = mode.setting.options
+        private val ancStart = anc.setting.start
+        private val ancStep = if (anc.setting.step <= 0) 1 else anc.setting.step
+        private val ancCount = (anc.setting.end - ancStart) / ancStep + 1
+        private val transStart = trans?.setting?.start ?: 1
+        private val transStep = if (trans == null || trans.setting.step <= 0) 1 else trans.setting.step
+        private val transCount = if (trans == null) 5 else (trans.setting.end - transStart) / transStep + 1
+        private var lastTransLevel = transCount
+        private var lastAncLevel = ancCount
+ 
+        private val bar = SegmentBar(
+            this@MainActivity,
+            (1..transCount).map { it.toString() } + "רגיל" + (transCount + 1..transCount + ancCount).map { it.toString() },
+        )
+        val view: LinearLayout = LinearLayout(this@MainActivity)
+ 
+        init {
+            view.orientation = LinearLayout.VERTICAL
+            view.addView(controlTitle("צליל סביבה"), matchWrap())
+            view.addView(bar, matchWrap())
+            val captions = LinearLayout(this@MainActivity)
+            captions.orientation = LinearLayout.HORIZONTAL
+            captions.layoutDirection = View.LAYOUT_DIRECTION_LTR
+            for ((text, gravity) in listOf("שקיפות" to Gravity.START, "ביטול רעש" to Gravity.END)) {
+                val caption = TextView(this@MainActivity)
+                caption.text = text
+                caption.textSize = 11f
+                caption.gravity = gravity
+                caption.setTextColor(UiStyle.textSecondary)
+                caption.setPadding(8, 0, 8, 4)
+                captions.addView(caption, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            }
+            view.addView(captions, matchWrap())
+            bar.onCommit = { index -> send(index) }
+        }
+ 
+        private fun optionFor(fragment: String): String? =
+            modeOptions.firstOrNull { it.lowercase(Locale.US).contains(fragment) }
+ 
+        private fun send(index: Int) {
+            val pairs = ArrayList<SettingIdValuePair>()
+            val description: String
+            if (index < transCount) {
+                val option = optionFor("transparen") ?: return
+                val level = transCount - index
+                pairs.add(SettingIdValuePair(modeKey, Value.StringValue(option)))
+                if (transKey != null) {
+                    pairs.add(SettingIdValuePair(transKey, Value.I32Value(transStart + (level - 1) * transStep)))
+                }
+                description = "שקיפות, רמה $level"
+            } else if (index == transCount) {
+                val option = optionFor("normal") ?: return
+                pairs.add(SettingIdValuePair(modeKey, Value.StringValue(option)))
+                description = "רגיל"
+            } else {
+                val option = optionFor("noise") ?: return
+                val level = index - transCount
+                pairs.add(SettingIdValuePair(modeKey, Value.StringValue(option)))
+                pairs.add(SettingIdValuePair(ancKey, Value.I32Value(ancStart + (level - 1) * ancStep)))
+                description = "ביטול רעש, רמה $level"
+            }
+            sendValues(device, pairs, description)
+        }
+ 
+        // Moves the bar to the state reported by the device.
+        fun update(mode: Setting.SelectSetting?, anc: Setting.I32RangeSetting?, trans: Setting.I32RangeSetting?) {
+            if (anc != null) lastAncLevel = ((anc.value - ancStart) / ancStep + 1).coerceIn(1, ancCount)
+            if (trans != null) lastTransLevel = ((trans.value - transStart) / transStep + 1).coerceIn(1, transCount)
+            val current = mode?.value?.lowercase(Locale.US) ?: return
+            when {
+                current.contains("transparen") -> bar.setLevelFromDevice(transCount - lastTransLevel)
+                current.contains("normal") -> bar.setLevelFromDevice(transCount)
+                current.contains("noise") -> bar.setLevelFromDevice(transCount + lastAncLevel)
+            }
+        }
+    }
+ 
+    private fun updateAmbientBar(device: Any, items: List<SettingItem>) {
+        fun find(vararg names: String): SettingItem? = items.firstOrNull { keyNorm(it.key) in names }
+        val modeItem = find("ambientsoundmode")
+        val ancItem = find("manualnoisecanceling", "manualnoisecancelling")
+        val transItem = find("manualtransparency")
+        val mode = modeItem?.setting as? Setting.SelectSetting
+        val anc = ancItem?.setting as? Setting.I32RangeSetting
+        val trans = transItem?.setting as? Setting.I32RangeSetting
+        if (ambientBar == null) {
+            if (modeItem == null || ancItem == null || mode == null || anc == null) return
+            val created = AmbientBar(device, modeItem.key, ancItem.key, transItem?.key, mode, anc, trans)
+            ambientBar = created
+            val card = sectionCard(modeItem.category)
+            if (card.childCount > 0) card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
+            card.addView(created.view, matchWrap())
+        }
+        ambientBar?.update(mode, anc, trans)
+    }
+ 
     // ---------- lifecycle ----------
  
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1422,7 +1602,7 @@ class MainActivity : Activity() {
         registerReceiver(scanReceiver, filter)
  
         showList()
-        line("גרסה: v9-עיצוב")
+        line("גרסה: v11-פס צליל")
         line("גרסת אנדרואיד (SDK): ${Build.VERSION.SDK_INT}")
  
         try {
@@ -1476,7 +1656,9 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when (currentScreen) {
             Screen.CONNECTED -> {
-                if (moreMode) {
+                if (moreMode && moreCategory != null) {
+                    showMoreMenu()
+                } else if (moreMode) {
                     setMoreMode(false)
                 } else {
                     autoConnectDone = true
