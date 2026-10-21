@@ -16,7 +16,7 @@ import android.widget.TextView
  * Every clickable view gets a clear blue frame while it has keyboard focus, because the phone has no touch screen.
  */
 object UiStyle {
-    val blue = 0xFF18B4EC.toInt()
+    val blue = 0xFF14B8EC.toInt()
     val blueDark = 0xFF0E8FC0.toInt()
     val blueLight = 0xFFE3F4FD.toInt()
     val background = 0xFFF3F6F9.toInt()
