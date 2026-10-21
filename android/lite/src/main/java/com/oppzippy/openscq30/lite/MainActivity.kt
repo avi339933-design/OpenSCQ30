@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
@@ -21,6 +22,9 @@ import android.text.TextWatcher
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.BaseAdapter
+import android.widget.FrameLayout
+import android.widget.Switch
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -102,13 +106,13 @@ class MainActivity : Activity() {
  
     // Device screen: tabs (sound, equalizer, buttons) and the "more settings" page.
     private var tabContainers: List<LinearLayout> = emptyList()
-    private var tabHeaders: List<TextView> = emptyList()
+    private var tabHeaders: List<LinearLayout> = emptyList()
     private var tabStrip: LinearLayout? = null
     private var currentTab = TAB_SOUND
     private var moreMode = false
     private var earbudsView: EarbudsView? = null
     private var titleView: TextView? = null
-    private var gearButton: Button? = null
+    private var gearButton: View? = null
     private var deviceTitle = ""
  
     // One entry per setting id: a function that refreshes its control from a new value.
@@ -295,13 +299,7 @@ class MainActivity : Activity() {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
  
-    private fun makeButton(label: String, onClick: () -> Unit): Button {
-        val button = Button(this)
-        button.text = label
-        button.textSize = 12f
-        button.setOnClickListener { onClick() }
-        return button
-    }
+    private fun makeButton(label: String, onClick: () -> Unit): Button = UiStyle.primaryButton(this, label, onClick)
  
     private fun matchWrap() =
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -357,7 +355,13 @@ class MainActivity : Activity() {
         }
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
-        val weight = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }
+        buttons.setBackgroundColor(UiStyle.card)
+        val margin = UiStyle.dp(this, 2f)
+        val weight = {
+            val params = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            params.setMargins(margin, margin, margin, margin)
+            params
+        }
         buttons.addView(makeButton("סרוק") { startScan() }, weight())
         buttons.addView(makeButton("רענן") { refreshDeviceList() }, weight())
         buttons.addView(showAllButton, weight())
@@ -370,6 +374,9 @@ class MainActivity : Activity() {
  
         val list = ListView(this)
         listView = list
+        list.divider = null
+        list.dividerHeight = 0
+        list.setDrawSelectorOnTop(true)
         list.setOnItemClickListener { _, _, position, _ ->
             if (position < deviceRows.size) onDeviceChosen(deviceRows[position])
         }
@@ -380,11 +387,13 @@ class MainActivity : Activity() {
  
         val status = TextView(this)
         status.textSize = 11f
+        status.setTextColor(UiStyle.textSecondary)
         status.setPadding(8, 8, 8, 8)
         statusView = status
  
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        root.setBackgroundColor(UiStyle.background)
         rtl(root)
         root.addView(buttons, matchWrap())
         root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -407,8 +416,46 @@ class MainActivity : Activity() {
     }
  
     private fun updateListAdapter() {
-        val texts = deviceRows.map { rowText(it) }
-        listView?.adapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, texts)
+        val rows = deviceRows
+        listView?.adapter = object : BaseAdapter() {
+            override fun getCount(): Int = rows.size
+ 
+            override fun getItem(position: Int): Any = rows[position]
+ 
+            override fun getItemId(position: Int): Long = position.toLong()
+ 
+            // Every device is a white rounded card: name, address and the assigned model.
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+                val row = rows[position]
+                val card = UiStyle.card(this@MainActivity)
+                val name = TextView(this@MainActivity)
+                name.text = row.name.ifEmpty { "לא ידוע" }
+                name.textSize = 16f
+                name.setTypeface(null, Typeface.BOLD)
+                name.setTextColor(UiStyle.textPrimary)
+                val mac = TextView(this@MainActivity)
+                mac.text = row.mac
+                mac.textSize = 11f
+                mac.setTextColor(UiStyle.textSecondary)
+                mac.textDirection = View.TEXT_DIRECTION_LTR
+                val model = TextView(this@MainActivity)
+                model.textSize = 13f
+                model.setTextColor(UiStyle.blueDark)
+                model.text = when {
+                    !row.bonded -> "בקרבת מקום – לחץ לזיווג"
+                    row.model != null -> "דגם: ${modelName(row.model)}"
+                    else -> "לחץ לבחירת דגם"
+                }
+                card.addView(name)
+                card.addView(mac)
+                card.addView(model)
+                val holder = FrameLayout(this@MainActivity)
+                val side = UiStyle.dp(this@MainActivity, 8f)
+                holder.setPadding(side, UiStyle.dp(this@MainActivity, 4f), side, UiStyle.dp(this@MainActivity, 4f))
+                holder.addView(card)
+                return holder
+            }
+        }
     }
  
     // All paired (bonded) Bluetooth devices, each with its assigned model (or null).
@@ -578,6 +625,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         rtl(root)
+        root.setBackgroundColor(UiStyle.background)
         root.addView(title, matchWrap())
         root.addView(search, matchWrap())
         root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -665,43 +713,56 @@ class MainActivity : Activity() {
         deviceTitle = bondedRows.firstOrNull { it.mac.equals(mac, ignoreCase = true) }?.name ?: ""
  
         val title = TextView(this)
-        title.textSize = 16f
+        title.textSize = 17f
         title.setTypeface(null, Typeface.BOLD)
+        title.setTextColor(UiStyle.textPrimary)
         title.gravity = Gravity.CENTER
         title.text = deviceTitle
         titleView = title
  
-        val gear = makeButton("הגדרות") { setMoreMode(true) }
+        val gear = UiStyle.textButton(this, "הגדרות") { setMoreMode(true) }
         gearButton = gear
  
         val topBar = LinearLayout(this)
         topBar.orientation = LinearLayout.HORIZONTAL
         topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
         topBar.gravity = Gravity.CENTER_VERTICAL
+        topBar.setBackgroundColor(UiStyle.card)
+        topBar.setPadding(UiStyle.dp(this, 4f), UiStyle.dp(this, 2f), UiStyle.dp(this, 4f), UiStyle.dp(this, 2f))
         topBar.addView(
-            makeButton("חזרה") { onBackPressed() },
+            UiStyle.textButton(this, "חזרה") { onBackPressed() },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.1f),
         )
         topBar.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 2f))
         topBar.addView(gear, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.1f))
  
         val earbuds = EarbudsView(this)
+        earbuds.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(UiStyle.blueLight, UiStyle.background),
+        )
         earbudsView = earbuds
-        val earbudsHeight = (150 * resources.displayMetrics.density).toInt()
+        val earbudsHeight = UiStyle.dp(this, 150f)
  
         val strip = LinearLayout(this)
         strip.orientation = LinearLayout.HORIZONTAL
         strip.layoutDirection = View.LAYOUT_DIRECTION_LTR
+        strip.setBackgroundColor(UiStyle.card)
         tabStrip = strip
-        val headers = ArrayList<TextView>()
+        val headers = ArrayList<LinearLayout>()
         listOf("צלילים", "איקוולייזר", "כפתורים").forEachIndexed { index, name ->
-            val header = TextView(this)
-            header.text = name
-            header.textSize = 14f
-            header.gravity = Gravity.CENTER
-            header.setPadding(8, 14, 8, 14)
+            val header = LinearLayout(this)
+            header.orientation = LinearLayout.VERTICAL
             header.isFocusable = true
             header.isClickable = true
+            header.background = UiStyle.focusable(this, UiStyle.card, 0f)
+            val label = TextView(this)
+            label.text = name
+            label.textSize = 14f
+            label.gravity = Gravity.CENTER
+            label.setPadding(8, 14, 8, 10)
+            header.addView(label, matchWrap())
+            header.addView(View(this), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, UiStyle.dp(this, 3f)))
             header.setOnClickListener { selectTab(index) }
             strip.addView(header, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             headers.add(header)
@@ -715,15 +776,20 @@ class MainActivity : Activity() {
             containers.add(container)
         }
         tabContainers = containers
-        containers[TAB_MORE].addView(makeButton("התחבר מחדש") { startConnection(currentMac) }, matchWrap())
+        containers[TAB_MORE].addView(
+            makeButton("התחבר מחדש") { startConnection(currentMac) },
+            UiStyle.cardParams(this),
+        )
  
         val log = TextView(this)
         log.textSize = 11f
+        log.setTextColor(UiStyle.textSecondary)
         log.setPadding(16, 16, 16, 16)
         connectionView = log
  
         val content = LinearLayout(this)
         content.orientation = LinearLayout.VERTICAL
+        content.setPadding(0, UiStyle.dp(this, 4f), 0, UiStyle.dp(this, 12f))
         containers.forEach { content.addView(it, matchWrap()) }
         content.addView(log, matchWrap())
  
@@ -732,6 +798,7 @@ class MainActivity : Activity() {
  
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        root.setBackgroundColor(UiStyle.background)
         rtl(root)
         root.addView(topBar, matchWrap())
         root.addView(
@@ -746,14 +813,12 @@ class MainActivity : Activity() {
         renderStatus()
     }
  
-    private fun styleTabHeader(header: TextView, selected: Boolean) {
-        header.setTextColor(if (selected) 0xFF33B5E5.toInt() else 0xFFCCCCCC.toInt())
-        header.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
-        val states = StateListDrawable()
-        states.addState(intArrayOf(android.R.attr.state_focused), ColorDrawable(0x6633B5E5))
-        states.addState(intArrayOf(android.R.attr.state_pressed), ColorDrawable(0x6633B5E5))
-        states.addState(intArrayOf(), ColorDrawable(if (selected) 0x2233B5E5 else 0x00000000))
-        header.background = states
+    private fun styleTabHeader(header: LinearLayout, selected: Boolean) {
+        val label = header.getChildAt(0) as TextView
+        val underline = header.getChildAt(1)
+        label.setTextColor(if (selected) UiStyle.blue else UiStyle.textSecondary)
+        label.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        underline.setBackgroundColor(if (selected) UiStyle.blue else 0)
     }
  
     private fun selectTab(index: Int) {
@@ -984,6 +1049,18 @@ class MainActivity : Activity() {
         }
     }
  
+    // The card of a settings category (created together with its small gray header, in the category's tab).
+    private fun sectionCard(category: String): LinearLayout {
+        val existing = sections[category]
+        if (existing != null) return existing
+        val container = tabContainers[tabFor(category)]
+        container.addView(UiStyle.sectionHeader(this, settingName(category)), matchWrap())
+        val card = UiStyle.card(this)
+        container.addView(card, UiStyle.cardParams(this))
+        sections[category] = card
+        return card
+    }
+ 
     private fun syncSettings(device: Any, items: List<SettingItem>) {
         if (tabContainers.isEmpty() || currentScreen != Screen.CONNECTED) return
         updateEarbuds(items)
@@ -996,19 +1073,9 @@ class MainActivity : Activity() {
                     if (loggedSkips.add(item.key)) line("(דילגתי על ${item.key}: ${setting.javaClass.simpleName})")
                     continue
                 }
-                var section = sections[item.category]
-                if (section == null) {
-                    section = LinearLayout(this)
-                    section.orientation = LinearLayout.VERTICAL
-                    val header = TextView(this)
-                    header.text = settingName(item.category)
-                    header.textSize = 14f
-                    header.setPadding(8, 16, 8, 4)
-                    section.addView(header)
-                    tabContainers[tabFor(item.category)].addView(section, matchWrap())
-                    sections[item.category] = section
-                }
-                section.addView(built.first, matchWrap())
+                val card = sectionCard(item.category)
+                if (card.childCount > 0) card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
+                card.addView(built.first, matchWrap())
                 controls[item.key] = built.second
                 updater = built.second
             }
@@ -1065,18 +1132,41 @@ class MainActivity : Activity() {
         }
     }
  
-    private fun infoControl(key: String, initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
+    private fun controlTitle(name: String): TextView {
         val view = TextView(this)
-        view.textSize = 13f
-        view.setPadding(8, 4, 8, 4)
-        view.text = "${settingName(key)}: $initial"
-        return Pair(view, { s -> view.text = "${settingName(key)}: ${textOf(s)}" })
+        view.text = name
+        view.textSize = 14f
+        view.setTextColor(UiStyle.textPrimary)
+        view.setPadding(8, 8, 8, 4)
+        return view
+    }
+ 
+    // A line with the name on one side and the current value on the other.
+    private fun infoControl(key: String, initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.setPadding(8, 12, 8, 12)
+        val name = TextView(this)
+        name.text = settingName(key)
+        name.textSize = 13f
+        name.setTextColor(UiStyle.textPrimary)
+        val value = TextView(this)
+        value.text = initial
+        value.textSize = 13f
+        value.setTextColor(UiStyle.textSecondary)
+        row.addView(name, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        return Pair(row, { s -> value.text = textOf(s) })
     }
  
     private fun toggleControl(device: Any, key: String, setting: Setting.ToggleSetting): Pair<View, (Any?) -> Unit> {
-        val box = CheckBox(this)
+        val box = Switch(this)
         box.text = settingName(key)
         box.textSize = 13f
+        box.setTextColor(UiStyle.textPrimary)
+        box.textOn = ""
+        box.textOff = ""
+        box.setPadding(8, 10, 8, 10)
         box.isChecked = setting.value
         box.setOnCheckedChangeListener { _, checked ->
             if (!updatingUi) {
@@ -1094,24 +1184,41 @@ class MainActivity : Activity() {
         return Pair(box, updater)
     }
  
-    // Sliders: with touch the value is sent when the finger is lifted. With a keypad there is no "lifted" event,
-    // so the value is sent shortly after the last key press.
+    // A range with up to 10 steps becomes a bar of numbered segments (like the original's level bar);
+    // a longer range stays a slider. Both work with keys: with a keypad the value is sent shortly after the last key.
     private fun rangeControl(device: Any, key: String, setting: Setting.I32RangeSetting): Pair<View, (Any?) -> Unit> {
         val range = setting.setting
         val start = range.start
         val step = if (range.step <= 0) 1 else range.step
-        val max = (range.end - start) / step
+        val count = (range.end - start) / step + 1
  
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        root.addView(controlTitle(settingName(key)), matchWrap())
+ 
+        if (count in 2..10) {
+            val bar = SegmentBar(this, (0 until count).map { (start + it * step).toString() })
+            bar.setLevelFromDevice((setting.value - start) / step)
+            bar.onCommit = { index ->
+                val value = start + index * step
+                sendValue(device, key, Value.I32Value(value), "${settingName(key)} = $value")
+            }
+            root.addView(bar, matchWrap())
+            val updater: (Any?) -> Unit = { s ->
+                if (s is Setting.I32RangeSetting) bar.setLevelFromDevice((s.value - start) / step)
+            }
+            return Pair(root, updater)
+        }
+ 
         val label = TextView(this)
         label.textSize = 13f
-        label.setPadding(8, 4, 8, 0)
+        label.setTextColor(UiStyle.textSecondary)
+        label.setPadding(8, 0, 8, 0)
         val bar = SeekBar(this)
         bar.layoutDirection = View.LAYOUT_DIRECTION_LTR
-        bar.max = max
+        bar.max = (range.end - start) / step
         bar.progress = (setting.value - start) / step
-        label.text = "${settingName(key)}: ${setting.value}"
+        label.text = "${setting.value}"
         var dragging = false
         var pendingSend: Runnable? = null
         val sendNow = Runnable {
@@ -1121,7 +1228,7 @@ class MainActivity : Activity() {
         }
         bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                label.text = "${settingName(key)}: ${start + progress * step}"
+                label.text = "${start + progress * step}"
                 if (fromUser && !dragging) {
                     pendingSend?.let { uiHandler.removeCallbacks(it) }
                     pendingSend = sendNow
@@ -1146,12 +1253,13 @@ class MainActivity : Activity() {
         val updater: (Any?) -> Unit = { s ->
             if (s is Setting.I32RangeSetting && !dragging && pendingSend == null) {
                 bar.progress = (s.value - start) / step
-                label.text = "${settingName(key)}: ${s.value}"
+                label.text = "${s.value}"
             }
         }
         return Pair(root, updater)
     }
  
+    // The equalizer as a curve with one point per band (see EqualizerGraphView for how to edit it with the keypad).
     private fun equalizerControl(
         device: Any,
         key: String,
@@ -1162,90 +1270,38 @@ class MainActivity : Activity() {
         val min = eq.min.toInt()
         val max = eq.max.toInt()
         val scale = Math.pow(10.0, eq.fractionDigits.toDouble())
-        val values = IntArray(bandCount) { setting.value.getOrElse(it) { 0 }.toInt() }
-        val dragging = BooleanArray(bandCount)
-        var pendingSend: Runnable? = null
-        val sendNow = Runnable {
-            pendingSend = null
-            sendValue(
-                device,
-                key,
-                Value.I16VecValue(values.map { it.toShort() }),
-                settingName(key),
-            )
+        val bandNames = (0 until bandCount).map { i ->
+            val hz = eq.bandHz[i].toString().toIntOrNull() ?: 0
+            if (hz >= 1000) {
+                val k = hz / 1000.0
+                if (k == k.toInt().toDouble()) "${k.toInt()}k" else String.format(Locale.US, "%.1fk", k)
+            } else {
+                "$hz"
+            }
         }
  
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        val title = TextView(this)
-        title.text = settingName(key)
-        title.textSize = 13f
-        title.setPadding(8, 4, 8, 0)
-        root.addView(title)
+        root.addView(controlTitle(settingName(key)), matchWrap())
  
-        val labels = ArrayList<TextView>()
-        val bars = ArrayList<SeekBar>()
- 
-        fun labelText(i: Int) =
-            "${eq.bandHz[i]} Hz: " + String.format(Locale.US, "%.1f", values[i] / scale)
- 
-        for (i in 0 until bandCount) {
-            val label = TextView(this)
-            label.textSize = 11f
-            label.setPadding(8, 2, 8, 0)
-            label.text = labelText(i)
-            val bar = SeekBar(this)
-            bar.layoutDirection = View.LAYOUT_DIRECTION_LTR
-            bar.max = max - min
-            bar.progress = values[i] - min
-            bar.isEnabled = !setting.readOnly
-            bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                    values[i] = progress + min
-                    label.text = labelText(i)
-                    if (fromUser && !dragging[i]) {
-                        pendingSend?.let { uiHandler.removeCallbacks(it) }
-                        pendingSend = sendNow
-                        uiHandler.postDelayed(sendNow, KEY_SEND_DELAY_MS)
-                    }
-                }
- 
-                override fun onStartTrackingTouch(seekBar: SeekBar) {
-                    dragging[i] = true
-                }
- 
-                override fun onStopTrackingTouch(seekBar: SeekBar) {
-                    dragging[i] = false
-                    pendingSend?.let { uiHandler.removeCallbacks(it) }
-                    pendingSend = null
-                    values[i] = seekBar.progress + min
-                    sendValue(
-                        device,
-                        key,
-                        Value.I16VecValue(values.map { it.toShort() }),
-                        "${settingName(key)} – ${eq.bandHz[i]} Hz",
-                    )
-                }
-            })
-            labels.add(label)
-            bars.add(bar)
-            root.addView(label, matchWrap())
-            root.addView(bar, matchWrap())
+        val graph = EqualizerGraphView(this, bandNames, min, max, scale)
+        graph.readOnly = setting.readOnly
+        graph.setValues(IntArray(bandCount) { setting.value.getOrElse(it) { 0 }.toInt() })
+        graph.onCommit = { newValues ->
+            sendValue(device, key, Value.I16VecValue(newValues.map { it.toShort() }), settingName(key))
         }
+        root.addView(graph, matchWrap())
  
         val updater: (Any?) -> Unit = { s ->
-            if (s is Setting.EqualizerSetting && !dragging.any { it } && pendingSend == null) {
-                for (i in 0 until bandCount) {
-                    values[i] = s.value.getOrElse(i) { 0 }.toInt()
-                    bars[i].progress = values[i] - min
-                    labels[i].text = labelText(i)
-                }
+            if (s is Setting.EqualizerSetting) {
+                graph.setValues(IntArray(bandCount) { s.value.getOrElse(it) { 0 }.toInt() })
             }
         }
         return Pair(root, updater)
     }
  
-    // Buttons for a list of options. With allowNone, an extra "-" button selects "no value".
+    // Up to 4 options: a row of buttons. More options: a row with the current choice that opens a list (like the
+    // original app's button settings and equalizer profiles). With allowNone, "ללא" selects "no value".
     private fun choiceControl(
         device: Any,
         key: String,
@@ -1255,43 +1311,63 @@ class MainActivity : Activity() {
         currentOf: (Any?) -> String?,
         makeValue: (String?) -> Value,
     ): Pair<View, (Any?) -> Unit> {
-        val root = LinearLayout(this)
-        root.orientation = LinearLayout.VERTICAL
- 
-        val title = TextView(this)
-        title.text = settingName(key)
-        title.textSize = 13f
-        title.setPadding(8, 4, 8, 0)
-        root.addView(title)
- 
+        val title = settingName(key)
         val entries = ArrayList<Pair<String?, String>>()
         options.forEachIndexed { i, option ->
             entries.add(Pair(option, optionText(option, labels.getOrElse(i) { option })))
         }
-        if (allowNone) entries.add(Pair(null, "-"))
+        if (allowNone) entries.add(Pair(null, "ללא"))
  
-        val choiceButtons = ArrayList<ChoiceButton>()
-        fun highlight(current: String?) {
-            choiceButtons.forEach {
-                it.button.text = (if (it.option == current) "● " else "") + it.label
-            }
-        }
- 
-        entries.chunked(3).forEach { chunk ->
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            chunk.forEach { (option, label) ->
-                val button = makeButton(label) {
-                    if (!updatingUi) {
-                        sendValue(device, key, makeValue(option), "${settingName(key)} = $label")
-                        highlight(option)
+        if (entries.size > 4) {
+            var currentOption: String? = null
+            var valueView: TextView? = null
+            val rowViews = UiStyle.row(this, title) {
+                val names = Array<CharSequence>(entries.size) { entries[it].second }
+                val checked = entries.indexOfFirst { it.first == currentOption }
+                AlertDialog.Builder(this)
+                    .setTitle(title)
+                    .setSingleChoiceItems(names, checked) { dialog, which ->
+                        val option = entries[which].first
+                        currentOption = option
+                        valueView?.text = entries[which].second
+                        sendValue(device, key, makeValue(option), "$title = ${entries[which].second}")
+                        dialog.dismiss()
                     }
-                }
-                row.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                choiceButtons.add(ChoiceButton(option, label, button))
+                    .setNegativeButton("ביטול", null)
+                    .show()
             }
-            root.addView(row, matchWrap())
+            valueView = rowViews.value
+            val updater: (Any?) -> Unit = { s ->
+                currentOption = currentOf(s)
+                valueView?.text = entries.firstOrNull { it.first == currentOption }?.second ?: ""
+            }
+            return Pair(rowViews.root, updater)
         }
+ 
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.addView(controlTitle(title), matchWrap())
+ 
+        val pills = ArrayList<Pair<String?, Button>>()
+        fun highlight(current: String?) {
+            pills.forEach { UiStyle.setPillSelected(this, it.second, it.first == current) }
+        }
+        val buttonRow = LinearLayout(this)
+        buttonRow.orientation = LinearLayout.HORIZONTAL
+        val margin = UiStyle.dp(this, 3f)
+        entries.forEach { (option, label) ->
+            val pill = UiStyle.pill(this, label) {
+                if (!updatingUi) {
+                    sendValue(device, key, makeValue(option), "$title = $label")
+                    highlight(option)
+                }
+            }
+            val params = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            params.setMargins(margin, margin, margin, margin)
+            buttonRow.addView(pill, params)
+            pills.add(Pair(option, pill))
+        }
+        root.addView(buttonRow, matchWrap())
  
         val updater: (Any?) -> Unit = { s -> highlight(currentOf(s)) }
         return Pair(root, updater)
@@ -1304,11 +1380,7 @@ class MainActivity : Activity() {
     ): Pair<View, (Any?) -> Unit> {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        val title = TextView(this)
-        title.text = settingName(key)
-        title.textSize = 13f
-        title.setPadding(8, 4, 8, 0)
-        root.addView(title)
+        root.addView(controlTitle(settingName(key)), matchWrap())
  
         val boxes = ArrayList<Pair<String, CheckBox>>()
         val options = setting.setting.options
@@ -1317,6 +1389,7 @@ class MainActivity : Activity() {
             val box = CheckBox(this)
             box.text = optionText(option, labels.getOrElse(i) { option })
             box.textSize = 12f
+            box.setTextColor(UiStyle.textPrimary)
             box.isChecked = option in setting.values
             box.setOnCheckedChangeListener { _, _ ->
                 if (!updatingUi) {
@@ -1338,6 +1411,8 @@ class MainActivity : Activity() {
     // ---------- lifecycle ----------
  
     override fun onCreate(savedInstanceState: Bundle?) {
+        // A light theme without the system title bar (the app draws its own top bars).
+        setTheme(android.R.style.Theme_Holo_Light_NoActionBar)
         super.onCreate(savedInstanceState)
  
         val filter = IntentFilter()
@@ -1347,7 +1422,7 @@ class MainActivity : Activity() {
         registerReceiver(scanReceiver, filter)
  
         showList()
-        line("גרסה: v8-ממשק")
+        line("גרסה: v9-עיצוב")
         line("גרסת אנדרואיד (SDK): ${Build.VERSION.SDK_INT}")
  
         try {
