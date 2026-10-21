@@ -96,6 +96,10 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
             paint.style = Paint.Style.FILL
             paint.color = if (i <= level) UiStyle.blue else UiStyle.track
             canvas.drawRoundRect(rect, 5f * density, 5f * density, paint)
+            paint.textSize = 13f * density
+            while (paint.measureText(labels[i]) > segmentWidth - 4f * density && paint.textSize > 7f * density) {
+                paint.textSize -= 1f * density
+            }
             paint.color = if (i <= level) Color.WHITE else UiStyle.textSecondary
             canvas.drawText(labels[i], rect.centerX(), rect.centerY() + paint.textSize * 0.35f, paint)
         }
