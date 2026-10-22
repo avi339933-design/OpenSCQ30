@@ -2,29 +2,28 @@ package com.oppzippy.openscq30.lite
  
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
-import android.view.Gravity
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
-import android.widget.BaseAdapter
-import android.widget.FrameLayout
-import android.widget.Switch
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -32,6 +31,7 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.oppzippy.openscq30.lib.bindings.LanguageIdentifier
@@ -43,6 +43,7 @@ import com.oppzippy.openscq30.lib.bindings.initNativeI18n
 import com.oppzippy.openscq30.lib.bindings.initNativeLogging
 import com.oppzippy.openscq30.lib.bindings.newSession
 import com.oppzippy.openscq30.lib.bindings.translateDeviceModel
+import com.oppzippy.openscq30.lib.wrapper.MultiSelectWithRemoveCommandInner
 import com.oppzippy.openscq30.lib.wrapper.PairedDevice
 import com.oppzippy.openscq30.lib.wrapper.Setting
 import com.oppzippy.openscq30.lib.wrapper.Value
@@ -72,12 +73,23 @@ class MainActivity : Activity() {
  
     private enum class Screen { LIST, PICKER, CONNECTED }
  
+    // The three pages of the first screen (the bottom bar): devices, log and the app's own settings.
+    private enum class ListTab { DEVICES, LOG, PROFILE }
+ 
     // bonded = already paired in Android's Bluetooth. Rows with bonded=false are nearby devices found by scanning.
     private data class Row(val name: String, val mac: String, val model: String?, val bonded: Boolean = true)
  
     private class SettingItem(val category: String, val key: String, val setting: Any?)
  
-    private class ChoiceButton(val option: String?, val label: String, val button: Button)
+    private class RadioItem(val option: String?, val root: LinearLayout, val dot: RadioDot, val label: TextView)
+ 
+    private class ProfileCard(
+        val option: String?,
+        val root: LinearLayout,
+        val icon: IconView,
+        val title: TextView,
+        val mark: IconView,
+    )
  
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs by lazy { getSharedPreferences("lite", MODE_PRIVATE) }
@@ -99,12 +111,18 @@ class MainActivity : Activity() {
     private val discovered = LinkedHashMap<String, String>() // MAC (upper case) -> name
     private var deviceRows: List<Row> = emptyList()
  
+    // First screen.
     private var statusView: TextView? = null
-    private var connectionView: TextView? = null
-    private var listView: ListView? = null
-    private var settingsContainer: LinearLayout? = null
+    private var logView: TextView? = null
+    private var cardsContainer: LinearLayout? = null
+    private var listBody: LinearLayout? = null
+    private var listTopBar: LinearLayout? = null
+    private var listTab = ListTab.DEVICES
+    private val navIcons = ArrayList<IconView>()
+    private var lastRowsSignature = ""
  
     // Device screen: tabs (sound, equalizer, buttons) and the "more settings" page.
+    private var connectionView: TextView? = null
     private var tabContainers: List<LinearLayout> = emptyList()
     private var tabHeaders: List<LinearLayout> = emptyList()
     private var tabStrip: LinearLayout? = null
@@ -116,9 +134,18 @@ class MainActivity : Activity() {
     private var deviceTitle = ""
     private var moreCategory: String? = null
     private var ambientBar: AmbientBar? = null
+    private val ambientHandled = HashSet<String>()
     private val morePages = HashMap<String, LinearLayout>()
     private var moreMenuViews: List<View> = emptyList()
     private var moreMenuCard: LinearLayout? = null
+ 
+    // The buttons tab: a Left / Right switch and one card for each side.
+    private var buttonsLeftCard: LinearLayout? = null
+    private var buttonsRightCard: LinearLayout? = null
+    private var buttonsOtherCard: LinearLayout? = null
+    private var sideLeftPill: Button? = null
+    private var sideRightPill: Button? = null
+    private val slideTitled = HashSet<LinearLayout>()
  
     // One entry per setting id: a function that refreshes its control from a new value.
     private val controls = HashMap<String, (Any?) -> Unit>()
@@ -199,6 +226,8 @@ class MainActivity : Activity() {
         view.layoutDirection = View.LAYOUT_DIRECTION_RTL
     }
  
+    private fun dpi(value: Float): Int = UiStyle.dp(this, value)
+ 
     private val scanReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -256,7 +285,10 @@ class MainActivity : Activity() {
     private fun renderStatus() {
         when (currentScreen) {
             Screen.CONNECTED -> connectionView?.text = statusLines.takeLast(15).joinToString("\n")
-            else -> statusView?.text = statusLines.takeLast(5).joinToString("\n")
+            else -> {
+                statusView?.text = statusLines.takeLast(3).joinToString("\n")
+                logView?.text = statusLines.takeLast(60).joinToString("\n")
+            }
         }
     }
  
@@ -309,6 +341,31 @@ class MainActivity : Activity() {
     private fun matchWrap() =
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
  
+    private fun weightParams(weight: Float = 1f) =
+        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight)
+ 
+    private fun smallText(text: String, size: Float, color: Int, bold: Boolean = false): TextView {
+        val view = TextView(this)
+        view.text = text
+        view.textSize = size
+        view.setTextColor(color)
+        if (bold) view.setTypeface(view.typeface, Typeface.BOLD)
+        return view
+    }
+ 
+    // A focusable icon button (the top bar of the device screen).
+    private fun iconButton(kind: IconKind, onClick: () -> Unit): LinearLayout {
+        val holder = LinearLayout(this)
+        holder.gravity = Gravity.CENTER
+        holder.isFocusable = true
+        holder.isClickable = true
+        holder.background = UiStyle.focusable(this, UiStyle.card, 8f)
+        holder.setPadding(dpi(8f), dpi(8f), dpi(8f), dpi(8f))
+        holder.addView(IconView(this, kind, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(24f), dpi(24f)))
+        holder.setOnClickListener { onClick() }
+        return holder
+    }
+ 
     // ---------- Bluetooth enable dialog ----------
  
     private fun ensureBluetoothEnabled(onReady: () -> Unit) {
@@ -345,121 +402,249 @@ class MainActivity : Activity() {
         }
     }
  
-    // ---------- device list screen ----------
+    // ---------- first screen: "my devices" ----------
  
     private fun showList() {
         currentScreen = Screen.LIST
         connectionView = null
-        settingsContainer = null
- 
-        val showAllButton = makeButton(if (showAll) "הכל: פעיל" else "הכל: כבוי") {}
-        showAllButton.setOnClickListener {
-            showAll = !showAll
-            showAllButton.text = if (showAll) "הכל: פעיל" else "הכל: כבוי"
-            refreshDeviceList()
-        }
-        val buttons = LinearLayout(this)
-        buttons.orientation = LinearLayout.HORIZONTAL
-        buttons.setBackgroundColor(UiStyle.card)
-        val margin = UiStyle.dp(this, 2f)
-        val weight = {
-            val params = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            params.setMargins(margin, margin, margin, margin)
-            params
-        }
-        buttons.addView(makeButton("סרוק") { startScan() }, weight())
-        buttons.addView(makeButton("רענן") { refreshDeviceList() }, weight())
-        buttons.addView(showAllButton, weight())
-        buttons.addView(
-            makeButton("עדכון") {
-                UpdateManager.showUpdateDialog(this, { disconnect("עדכון") }, { line(it) })
-            },
-            weight(),
-        )
- 
-        val list = ListView(this)
-        listView = list
-        list.divider = null
-        list.dividerHeight = 0
-        list.setDrawSelectorOnTop(true)
-        list.setOnItemClickListener { _, _, position, _ ->
-            if (position < deviceRows.size) onDeviceChosen(deviceRows[position])
-        }
-        list.setOnItemLongClickListener { _, _, position, _ ->
-            if (position < deviceRows.size && deviceRows[position].bonded) showDeviceMenu(deviceRows[position])
-            true
-        }
- 
-        val status = TextView(this)
-        status.textSize = 11f
-        status.setTextColor(UiStyle.textSecondary)
-        status.setPadding(8, 8, 8, 8)
-        statusView = status
+        cardsContainer = null
+        logView = null
+        lastRowsSignature = ""
  
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(UiStyle.background)
         rtl(root)
-        root.addView(buttons, matchWrap())
-        root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+ 
+        // Top bar: a bell on one side, the logo in the middle and a headset on the other (like the original app).
+        val topBar = LinearLayout(this)
+        topBar.orientation = LinearLayout.HORIZONTAL
+        topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
+        topBar.gravity = Gravity.CENTER_VERTICAL
+        topBar.setPadding(dpi(12f), dpi(8f), dpi(12f), dpi(4f))
+        topBar.addView(IconView(this, IconKind.BELL, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(24f), dpi(24f)))
+        val logo = smallText("soundcore", 20f, UiStyle.blue, true)
+        logo.setTypeface(logo.typeface, Typeface.BOLD_ITALIC)
+        logo.gravity = Gravity.CENTER
+        topBar.addView(logo, weightParams())
+        topBar.addView(IconView(this, IconKind.HEADSET, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(24f), dpi(24f)))
+        listTopBar = topBar
+        root.addView(topBar, matchWrap())
+ 
+        val body = LinearLayout(this)
+        body.orientation = LinearLayout.VERTICAL
+        listBody = body
+        val scroll = ScrollView(this)
+        scroll.addView(body)
+        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+ 
+        val status = smallText("", 10f, UiStyle.textSecondary)
+        status.setPadding(dpi(12f), dpi(2f), dpi(12f), dpi(4f))
+        statusView = status
         root.addView(status, matchWrap())
+ 
+        root.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
+        root.addView(buildBottomNav(), matchWrap())
         setContentView(root)
  
-        updateListAdapter()
-        renderStatus()
+        showListTab(ListTab.DEVICES)
         refreshDeviceList()
     }
  
-    private fun rowText(row: Row): String {
-        val name = row.name.ifEmpty { "לא ידוע" }
-        val modelLine = when {
-            !row.bonded -> "(בקרבת מקום – לחץ לזיווג)"
-            row.model != null -> "דגם: ${modelName(row.model)}"
-            else -> "(לחץ לבחירת דגם)"
+    // The bottom bar: devices, log and the app's own settings.
+    private fun buildBottomNav(): LinearLayout {
+        val nav = LinearLayout(this)
+        nav.orientation = LinearLayout.HORIZONTAL
+        nav.layoutDirection = View.LAYOUT_DIRECTION_LTR
+        nav.setBackgroundColor(UiStyle.card)
+        navIcons.clear()
+        listOf(
+            Pair(IconKind.DEVICES, ListTab.DEVICES),
+            Pair(IconKind.PLANET, ListTab.LOG),
+            Pair(IconKind.PERSON, ListTab.PROFILE),
+        ).forEach { (kind, tab) ->
+            val holder = LinearLayout(this)
+            holder.gravity = Gravity.CENTER
+            holder.isFocusable = true
+            holder.isClickable = true
+            holder.background = UiStyle.focusable(this, UiStyle.card, 0f)
+            holder.setPadding(0, dpi(9f), 0, dpi(9f))
+            val icon = IconView(this, kind, UiStyle.textSecondary)
+            holder.addView(icon, LinearLayout.LayoutParams(dpi(26f), dpi(26f)))
+            holder.setOnClickListener { showListTab(tab) }
+            navIcons.add(icon)
+            nav.addView(holder, weightParams())
         }
-        return "$name\n${row.mac}\n$modelLine"
+        return nav
     }
  
-    private fun updateListAdapter() {
-        val rows = deviceRows
-        listView?.adapter = object : BaseAdapter() {
-            override fun getCount(): Int = rows.size
+    private fun showListTab(tab: ListTab) {
+        listTab = tab
+        val body = listBody ?: return
+        body.removeAllViews()
+        cardsContainer = null
+        logView = null
+        lastRowsSignature = ""
+        listTopBar?.visibility = if (tab == ListTab.PROFILE) View.GONE else View.VISIBLE
+        statusView?.visibility = if (tab == ListTab.LOG) View.GONE else View.VISIBLE
+        navIcons.forEachIndexed { i, icon -> icon.setTint(if (i == tab.ordinal) UiStyle.blue else UiStyle.textSecondary) }
+        when (tab) {
+            ListTab.DEVICES -> buildDevicesBody(body)
+            ListTab.LOG -> buildLogBody(body)
+            ListTab.PROFILE -> buildProfileBody(body)
+        }
+        renderStatus()
+    }
  
-            override fun getItem(position: Int): Any = rows[position]
+    private fun buildDevicesBody(body: LinearLayout) {
+        val heading = smallText("המכשירים שלי", 14f, UiStyle.textSecondary)
+        heading.setPadding(dpi(14f), dpi(4f), dpi(14f), dpi(2f))
+        body.addView(heading, matchWrap())
  
-            override fun getItemId(position: Int): Long = position.toLong()
+        val container = LinearLayout(this)
+        container.orientation = LinearLayout.VERTICAL
+        cardsContainer = container
+        body.addView(container, matchWrap())
  
-            // Every device is a white rounded card: name, address and the assigned model.
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
-                val row = rows[position]
-                val card = UiStyle.card(this@MainActivity)
-                val name = TextView(this@MainActivity)
-                name.text = row.name.ifEmpty { "לא ידוע" }
-                name.textSize = 16f
-                name.setTypeface(null, Typeface.BOLD)
-                name.setTextColor(UiStyle.textPrimary)
-                val mac = TextView(this@MainActivity)
-                mac.text = row.mac
-                mac.textSize = 11f
-                mac.setTextColor(UiStyle.textSecondary)
-                mac.textDirection = View.TEXT_DIRECTION_LTR
-                val model = TextView(this@MainActivity)
-                model.textSize = 13f
-                model.setTextColor(UiStyle.blueDark)
-                model.text = when {
-                    !row.bonded -> "בקרבת מקום – לחץ לזיווג"
-                    row.model != null -> "דגם: ${modelName(row.model)}"
-                    else -> "לחץ לבחירת דגם"
-                }
-                card.addView(name)
-                card.addView(mac)
-                card.addView(model)
-                val holder = FrameLayout(this@MainActivity)
-                val side = UiStyle.dp(this@MainActivity, 8f)
-                holder.setPadding(side, UiStyle.dp(this@MainActivity, 4f), side, UiStyle.dp(this@MainActivity, 4f))
-                holder.addView(card)
-                return holder
+        // "Add device" scans for nearby earbuds (they must be in pairing mode).
+        val add = LinearLayout(this)
+        add.orientation = LinearLayout.HORIZONTAL
+        add.gravity = Gravity.CENTER
+        add.isFocusable = true
+        add.isClickable = true
+        add.background = UiStyle.focusable(this, UiStyle.card, 14f)
+        add.setPadding(dpi(12f), dpi(14f), dpi(12f), dpi(14f))
+        add.addView(IconView(this, IconKind.PLUS, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
+        val addText = smallText("הוסף מכשיר", 14f, UiStyle.textSecondary)
+        addText.setPadding(dpi(6f), 0, 0, 0)
+        add.addView(addText)
+        add.setOnClickListener { startScan() }
+        body.addView(add, UiStyle.cardParams(this))
+ 
+        renderCards()
+    }
+ 
+    private fun buildLogBody(body: LinearLayout) {
+        val log = TextView(this)
+        log.textSize = 10f
+        log.typeface = Typeface.MONOSPACE
+        log.setTextColor(UiStyle.textPrimary)
+        log.layoutDirection = View.LAYOUT_DIRECTION_LTR
+        log.setPadding(dpi(10f), dpi(10f), dpi(10f), dpi(10f))
+        logView = log
+        body.addView(log, matchWrap())
+    }
+ 
+    // The app's own settings, like the "profile" page of the original app.
+    private fun buildProfileBody(body: LinearLayout) {
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.VERTICAL
+        head.gravity = Gravity.CENTER_HORIZONTAL
+        head.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(UiStyle.blueLight, UiStyle.background),
+        )
+        head.setPadding(0, dpi(22f), 0, dpi(14f))
+        val avatar = LinearLayout(this)
+        avatar.gravity = Gravity.CENTER
+        avatar.background = UiStyle.rounded(0xFFCFD6DE.toInt(), dpi(28f).toFloat())
+        avatar.addView(IconView(this, IconKind.DEVICES, Color.WHITE), LinearLayout.LayoutParams(dpi(30f), dpi(30f)))
+        head.addView(avatar, LinearLayout.LayoutParams(dpi(56f), dpi(56f)))
+        val name = smallText("OpenSCQ30 Lite", 16f, UiStyle.textPrimary, true)
+        name.gravity = Gravity.CENTER
+        name.setPadding(0, dpi(8f), 0, 0)
+        head.addView(name, matchWrap())
+        body.addView(head, matchWrap())
+ 
+        val card = UiStyle.card(this)
+ 
+        val showAllSwitch = Switch(this)
+        showAllSwitch.text = "הצג את כל המכשירים (לא רק Anker)"
+        showAllSwitch.textSize = 13f
+        showAllSwitch.setTextColor(UiStyle.textPrimary)
+        showAllSwitch.textOn = ""
+        showAllSwitch.textOff = ""
+        showAllSwitch.setPadding(dpi(8f), dpi(10f), dpi(8f), dpi(10f))
+        showAllSwitch.isChecked = showAll
+        showAllSwitch.setOnCheckedChangeListener { _, checked ->
+            showAll = checked
+            refreshDeviceList()
+        }
+        card.addView(showAllSwitch, matchWrap())
+ 
+        fun addRow(title: String, onClick: () -> Unit) {
+            card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
+            val row = UiStyle.row(this, title, onClick)
+            row.value.visibility = View.GONE
+            card.addView(row.root, matchWrap())
+        }
+        addRow("סרוק מכשירים בסביבה") { startScan() }
+        addRow("רענן את רשימת המכשירים") { refreshDeviceList() }
+        addRow("עדכון האפליקציה") {
+            UpdateManager.showUpdateDialog(this, { disconnect("עדכון") }, { line(it) })
+        }
+ 
+        card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
+        val version = LinearLayout(this)
+        version.orientation = LinearLayout.HORIZONTAL
+        version.setPadding(dpi(8f), dpi(12f), dpi(8f), dpi(12f))
+        version.addView(smallText("גרסה", 13f, UiStyle.textPrimary), weightParams())
+        version.addView(smallText(APP_VERSION, 13f, UiStyle.textSecondary))
+        card.addView(version, matchWrap())
+ 
+        body.addView(card, UiStyle.cardParams(this))
+    }
+ 
+    // Builds one card per device. The cards are rebuilt only when the list really changed, so the keypad focus
+    // does not jump while the scan keeps reporting the same devices.
+    private fun renderCards() {
+        val container = cardsContainer ?: return
+        val signature = deviceRows.joinToString("|") { "${it.mac}/${it.name}/${it.model}/${it.bonded}" }
+        if (signature == lastRowsSignature) return
+        lastRowsSignature = signature
+        container.removeAllViews()
+        if (deviceRows.isEmpty()) {
+            val empty = smallText("אין מכשירים להצגה", 12f, UiStyle.textSecondary)
+            empty.setPadding(dpi(14f), dpi(10f), dpi(14f), dpi(10f))
+            container.addView(empty, matchWrap())
+            return
+        }
+        deviceRows.forEach { row ->
+            val card = LinearLayout(this)
+            card.orientation = LinearLayout.HORIZONTAL
+            card.gravity = Gravity.CENTER_VERTICAL
+            card.isFocusable = true
+            card.isClickable = true
+            card.background = UiStyle.focusable(this, UiStyle.card, 14f)
+            card.setPadding(dpi(12f), dpi(12f), dpi(12f), dpi(12f))
+ 
+            val picture = DevicePictureView(this)
+            picture.setModel(row.model ?: "")
+            card.addView(picture, LinearLayout.LayoutParams(dpi(80f), dpi(64f)))
+ 
+            val title = if (row.model != null) modelName(row.model) else row.name.ifEmpty { "לא ידוע" }
+            val status = when {
+                !row.bonded -> "בקרבת מקום – לחץ לזיווג"
+                row.model != null -> "לא מחובר"
+                else -> "לחץ לבחירת דגם"
             }
+            val texts = LinearLayout(this)
+            texts.orientation = LinearLayout.VERTICAL
+            texts.addView(smallText(title, 16f, UiStyle.textPrimary, true), matchWrap())
+            texts.addView(smallText(status, 12f, UiStyle.textSecondary), matchWrap())
+            if (row.bonded && row.model != null && row.name.isNotEmpty() && row.name != title) {
+                texts.addView(smallText(row.name, 10f, UiStyle.textSecondary), matchWrap())
+            }
+            val textParams = weightParams()
+            textParams.marginStart = dpi(12f)
+            card.addView(texts, textParams)
+ 
+            card.setOnClickListener { onDeviceChosen(row) }
+            card.setOnLongClickListener {
+                if (row.bonded) showDeviceMenu(row)
+                true
+            }
+            container.addView(card, UiStyle.cardParams(this))
         }
     }
  
@@ -484,7 +669,7 @@ class MainActivity : Activity() {
             .filter { it.key !in bondedMacs && (showAll || isAnker(it.key)) }
             .map { Row(it.value, it.key, null, false) }
         deviceRows = bonded + nearby
-        updateListAdapter()
+        renderCards()
     }
  
     private fun refreshDeviceList() {
@@ -494,7 +679,7 @@ class MainActivity : Activity() {
                 bondedRows = allRows()
                 rebuildRows()
                 if (deviceRows.isEmpty()) {
-                    line("לא נמצאו מכשירי Anker (${bondedRows.size} מכשירים מזווגים בסך הכל). לחץ על סרוק, או הפעל 'הכל'.")
+                    line("לא נמצאו מכשירי Anker (${bondedRows.size} מכשירים מזווגים בסך הכל). לחץ על 'הוסף מכשיר', או הפעל 'הצג את כל המכשירים'.")
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
@@ -578,7 +763,8 @@ class MainActivity : Activity() {
         currentScreen = Screen.PICKER
         connectionView = null
         statusView = null
-        settingsContainer = null
+        cardsContainer = null
+        logView = null
  
         val models: List<Pair<String, String>> = try {
             deviceModels()
@@ -702,18 +888,23 @@ class MainActivity : Activity() {
  
     // ---------- connected screen ----------
  
-    // Device screen, modeled on the original Soundcore app: a top bar, the earbuds and case with their battery,
-    // three tabs (sound, equalizer, buttons) and a "more settings" page behind the settings button.
+    // Device screen, modeled on the original Soundcore app: a white top bar (back, name, headset, settings), the
+    // picture with the batteries, three icon tabs (sound, equalizer, buttons) and a "more settings" page behind
+    // the settings button.
     private fun showConnectedScreen(mac: String) {
         currentScreen = Screen.CONNECTED
         currentMac = mac
         statusView = null
+        logView = null
+        cardsContainer = null
         controls.clear()
         sections.clear()
         loggedSkips.clear()
+        slideTitled.clear()
         lastRefreshError = ""
         reportedUntranslated = 0
         ambientBar = null
+        ambientHandled.clear()
         currentTab = TAB_SOUND
         moreMode = false
         deviceTitle = bondedRows.firstOrNull { it.mac.equals(mac, ignoreCase = true) }?.name ?: ""
@@ -723,10 +914,11 @@ class MainActivity : Activity() {
         title.setTypeface(null, Typeface.BOLD)
         title.setTextColor(UiStyle.textPrimary)
         title.gravity = Gravity.CENTER
+        title.maxLines = 1
         title.text = deviceTitle
         titleView = title
  
-        val gear = UiStyle.textButton(this, "הגדרות") { setMoreMode(true) }
+        val gear = iconButton(IconKind.GEAR) { setMoreMode(true) }
         gearButton = gear
  
         val topBar = LinearLayout(this)
@@ -734,21 +926,19 @@ class MainActivity : Activity() {
         topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
         topBar.gravity = Gravity.CENTER_VERTICAL
         topBar.setBackgroundColor(UiStyle.card)
-        topBar.setPadding(UiStyle.dp(this, 4f), UiStyle.dp(this, 2f), UiStyle.dp(this, 4f), UiStyle.dp(this, 2f))
-        topBar.addView(
-            UiStyle.textButton(this, "חזרה") { onBackPressed() },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.1f),
-        )
-        topBar.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 2f))
-        topBar.addView(gear, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.1f))
+        topBar.setPadding(dpi(4f), dpi(2f), dpi(4f), dpi(2f))
+        topBar.addView(iconButton(IconKind.BACK) { onBackPressed() }, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
+        topBar.addView(title, weightParams())
+        val headset = LinearLayout(this)
+        headset.gravity = Gravity.CENTER
+        headset.addView(IconView(this, IconKind.HEADSET, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(24f), dpi(24f)))
+        topBar.addView(headset, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
+        topBar.addView(gear, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
  
         val earbuds = EarbudsView(this)
-        earbuds.background = GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(UiStyle.blueLight, UiStyle.background),
-        )
+        earbuds.setBackgroundColor(UiStyle.card)
         earbudsView = earbuds
-        val earbudsHeight = UiStyle.dp(this, 150f)
+        val earbudsHeight = dpi(170f)
  
         val strip = LinearLayout(this)
         strip.orientation = LinearLayout.HORIZONTAL
@@ -756,21 +946,20 @@ class MainActivity : Activity() {
         strip.setBackgroundColor(UiStyle.card)
         tabStrip = strip
         val headers = ArrayList<LinearLayout>()
-        listOf("צלילים", "איקוולייזר", "כפתורים").forEachIndexed { index, name ->
+        listOf(IconKind.SOUND, IconKind.EQUALIZER, IconKind.TOUCH).forEachIndexed { index, kind ->
             val header = LinearLayout(this)
             header.orientation = LinearLayout.VERTICAL
+            header.gravity = Gravity.CENTER_HORIZONTAL
             header.isFocusable = true
             header.isClickable = true
             header.background = UiStyle.focusable(this, UiStyle.card, 0f)
-            val label = TextView(this)
-            label.text = name
-            label.textSize = 14f
-            label.gravity = Gravity.CENTER
-            label.setPadding(8, 14, 8, 10)
-            header.addView(label, matchWrap())
-            header.addView(View(this), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, UiStyle.dp(this, 3f)))
+            header.setPadding(0, dpi(8f), 0, 0)
+            header.addView(IconView(this, kind, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(26f), dpi(26f)))
+            val underline = LinearLayout.LayoutParams(dpi(26f), dpi(3f))
+            underline.topMargin = dpi(6f)
+            header.addView(View(this), underline)
             header.setOnClickListener { selectTab(index) }
-            strip.addView(header, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            strip.addView(header, weightParams())
             headers.add(header)
         }
         tabHeaders = headers
@@ -782,6 +971,37 @@ class MainActivity : Activity() {
             containers.add(container)
         }
         tabContainers = containers
+ 
+        // Buttons tab: Left / Right switch, then a card for the chosen side and a card for general button settings.
+        val buttonsTab = containers[TAB_CONTROLS]
+        val sideRow = LinearLayout(this)
+        sideRow.orientation = LinearLayout.HORIZONTAL
+        sideRow.layoutDirection = View.LAYOUT_DIRECTION_LTR
+        val leftPill = UiStyle.pill(this, "שמאל") { showSide(0) }
+        val rightPill = UiStyle.pill(this, "ימין") { showSide(1) }
+        sideLeftPill = leftPill
+        sideRightPill = rightPill
+        val pillMargin = dpi(8f)
+        val leftParams = weightParams()
+        leftParams.setMargins(pillMargin, dpi(6f), dpi(4f), dpi(6f))
+        val rightParams = weightParams()
+        rightParams.setMargins(dpi(4f), dpi(6f), pillMargin, dpi(6f))
+        sideRow.addView(leftPill, leftParams)
+        sideRow.addView(rightPill, rightParams)
+        buttonsTab.addView(sideRow, matchWrap())
+        val leftCard = UiStyle.card(this)
+        val rightCard = UiStyle.card(this)
+        val otherCard = UiStyle.card(this)
+        otherCard.visibility = View.GONE
+        buttonsLeftCard = leftCard
+        buttonsRightCard = rightCard
+        buttonsOtherCard = otherCard
+        buttonsTab.addView(leftCard, UiStyle.cardParams(this))
+        buttonsTab.addView(rightCard, UiStyle.cardParams(this))
+        buttonsTab.addView(otherCard, UiStyle.cardParams(this))
+        showSide(0)
+ 
+        // More settings: a menu with one row per category, then a "reconnect" button.
         val menuCard = UiStyle.card(this)
         val reconnect = makeButton("התחבר מחדש") { startConnection(currentMac) }
         containers[TAB_MORE].addView(menuCard, UiStyle.cardParams(this))
@@ -799,7 +1019,7 @@ class MainActivity : Activity() {
  
         val content = LinearLayout(this)
         content.orientation = LinearLayout.VERTICAL
-        content.setPadding(0, UiStyle.dp(this, 4f), 0, UiStyle.dp(this, 12f))
+        content.setPadding(0, dpi(4f), 0, dpi(12f))
         containers.forEach { content.addView(it, matchWrap()) }
         content.addView(log, matchWrap())
  
@@ -811,11 +1031,9 @@ class MainActivity : Activity() {
         root.setBackgroundColor(UiStyle.background)
         rtl(root)
         root.addView(topBar, matchWrap())
-        root.addView(
-            earbuds,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, earbudsHeight),
-        )
+        root.addView(earbuds, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, earbudsHeight))
         root.addView(strip, matchWrap())
+        root.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
         root.addView(scrollView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
  
@@ -823,11 +1041,17 @@ class MainActivity : Activity() {
         renderStatus()
     }
  
+    private fun showSide(side: Int) {
+        buttonsLeftCard?.visibility = if (side == 0) View.VISIBLE else View.GONE
+        buttonsRightCard?.visibility = if (side == 1) View.VISIBLE else View.GONE
+        sideLeftPill?.let { UiStyle.setPillSelected(this, it, side == 0) }
+        sideRightPill?.let { UiStyle.setPillSelected(this, it, side == 1) }
+    }
+ 
     private fun styleTabHeader(header: LinearLayout, selected: Boolean) {
-        val label = header.getChildAt(0) as TextView
+        val icon = header.getChildAt(0) as IconView
         val underline = header.getChildAt(1)
-        label.setTextColor(if (selected) UiStyle.blue else UiStyle.textSecondary)
-        label.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        icon.setTint(if (selected) UiStyle.blue else UiStyle.textSecondary)
         underline.setBackgroundColor(if (selected) UiStyle.blue else 0)
     }
  
@@ -839,7 +1063,7 @@ class MainActivity : Activity() {
         }
     }
  
-    // The "more settings" page replaces the earbuds picture and the tabs (like the original app's second page).
+    // The "more settings" page replaces the picture and the tabs (like the original app's second page).
     private fun setMoreMode(on: Boolean) {
         moreMode = on
         earbudsView?.visibility = if (on) View.GONE else View.VISIBLE
@@ -892,7 +1116,7 @@ class MainActivity : Activity() {
         }
     }
  
-    // Reads the battery settings and gives them to the earbuds picture.
+    // Reads the battery settings and gives them to the picture.
     private fun updateEarbuds(items: List<SettingItem>) {
         var leftPercent: Int? = null
         var rightPercent: Int? = null
@@ -903,7 +1127,7 @@ class MainActivity : Activity() {
         var caseCharging = false
         for (item in items) {
             val text = (item.setting as? Setting.InformationSetting)?.translatedValue ?: continue
-            val key = item.key.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
+            val key = keyNorm(item.key)
             val percent = Regex("(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()
             val lower = text.lowercase(Locale.US)
             val charging = lower.contains("charg") && !lower.contains("not")
@@ -1103,8 +1327,9 @@ class MainActivity : Activity() {
         }
     }
  
-    // The card of a settings category. Categories of the tabs get a small gray header; every other category becomes
-    // its own page behind a row in the "more settings" menu.
+    // The card of a settings category. Categories of the tabs get a small gray header (except the sound tab, which
+    // has none in the original app); every other category becomes its own page behind a row in the "more settings"
+    // menu.
     private fun sectionCard(category: String): LinearLayout {
         val existing = sections[category]
         if (existing != null) return existing
@@ -1120,11 +1345,30 @@ class MainActivity : Activity() {
             addMoreMenuRow(category)
         } else {
             val container = tabContainers[tab]
-            container.addView(UiStyle.sectionHeader(this, settingName(category)), matchWrap())
+            if (tab != TAB_SOUND) {
+                container.addView(UiStyle.sectionHeader(this, settingName(category)), matchWrap())
+            }
             container.addView(card, UiStyle.cardParams(this))
         }
         sections[category] = card
         return card
+    }
+ 
+    // The card a control goes into. Button settings go to the card of their side (left / right) in the buttons tab.
+    private fun cardFor(item: SettingItem): LinearLayout {
+        if (tabFor(item.category) == TAB_CONTROLS) {
+            val k = keyNorm(item.key)
+            val target = when {
+                k.startsWith("left") -> buttonsLeftCard
+                k.startsWith("right") -> buttonsRightCard
+                else -> buttonsOtherCard
+            }
+            if (target != null) {
+                if (target === buttonsOtherCard) target.visibility = View.VISIBLE
+                return target
+            }
+        }
+        return sectionCard(item.category)
     }
  
     private fun syncSettings(device: Any, items: List<SettingItem>) {
@@ -1132,17 +1376,23 @@ class MainActivity : Activity() {
         updateEarbuds(items)
         updateAmbientBar(device, items)
         for (item in items) {
-            if (ambientBar != null && keyNorm(item.key) in ambientKeys) continue
+            if (ambientBar != null && keyNorm(item.key) in ambientHandled) continue
             val setting = item.setting ?: continue
+            // The battery levels are shown in the header.
+            if (setting is Setting.InformationSetting && keyNorm(item.key).contains("battery")) continue
             var updater = controls[item.key]
             if (updater == null) {
-                val built = buildControl(device, item.key, setting)
+                val tab = tabFor(item.category)
+                val built = buildControl(device, item.key, setting, tab)
                 if (built == null) {
                     if (loggedSkips.add(item.key)) line("(דילגתי על ${item.key}: ${setting.javaClass.simpleName})")
                     continue
                 }
-                val card = sectionCard(item.category)
+                val card = cardFor(item)
                 if (card.childCount > 0) card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
+                if (tab == TAB_CONTROLS && keyNorm(item.key).contains("slide") && slideTitled.add(card)) {
+                    card.addView(UiStyle.sectionHeader(this, "לא ניתן לשינוי"), matchWrap())
+                }
                 card.addView(built.first, matchWrap())
                 controls[item.key] = built.second
                 updater = built.second
@@ -1157,23 +1407,56 @@ class MainActivity : Activity() {
         reportUntranslated()
     }
  
-    private fun buildControl(device: Any, key: String, setting: Any): Pair<View, (Any?) -> Unit>? {
+    private fun entriesOf(
+        options: List<String>,
+        labels: List<String>,
+        allowNone: Boolean,
+        noneLabel: String = "ללא",
+    ): ArrayList<Pair<String?, String>> {
+        val entries = ArrayList<Pair<String?, String>>()
+        options.forEachIndexed { i, option ->
+            entries.add(Pair(option, optionText(option, labels.getOrElse(i) { option })))
+        }
+        if (allowNone) entries.add(Pair(null, noneLabel))
+        return entries
+    }
+ 
+    // A select: in the buttons tab it is a row with an icon (like the original app), elsewhere it depends on the
+    // number of options.
+    private fun selectControl(
+        device: Any,
+        key: String,
+        options: List<String>,
+        labels: List<String>,
+        allowNone: Boolean,
+        pressRow: Boolean,
+        currentOf: (Any?) -> String?,
+        makeValue: (String?) -> Value,
+    ): Pair<View, (Any?) -> Unit> =
+        if (pressRow) {
+            pressRowControl(device, key, options, labels, allowNone, currentOf, makeValue)
+        } else {
+            choiceControl(device, key, options, labels, allowNone, currentOf, makeValue)
+        }
+ 
+    private fun buildControl(device: Any, key: String, setting: Any, tab: Int): Pair<View, (Any?) -> Unit>? {
+        val pressRow = tab == TAB_CONTROLS
         return when (setting) {
             is Setting.ToggleSetting -> toggleControl(device, key, setting)
             is Setting.I32RangeSetting -> rangeControl(device, key, setting)
             is Setting.EqualizerSetting -> equalizerControl(device, key, setting)
-            is Setting.SelectSetting -> choiceControl(
-                device, key, setting.setting.options, setting.setting.localizedOptions, false,
+            is Setting.SelectSetting -> selectControl(
+                device, key, setting.setting.options, setting.setting.localizedOptions, false, pressRow,
                 { (it as? Setting.SelectSetting)?.value },
                 { Value.StringValue(it ?: "") },
             )
-            is Setting.OptionalSelectSetting -> choiceControl(
-                device, key, setting.setting.options, setting.setting.localizedOptions, true,
+            is Setting.OptionalSelectSetting -> selectControl(
+                device, key, setting.setting.options, setting.setting.localizedOptions, true, pressRow,
                 { (it as? Setting.OptionalSelectSetting)?.value },
                 { Value.OptionalStringValue(it) },
             )
-            is Setting.PresetEqualizerProfileSelect -> choiceControl(
-                device, key, setting.select.options, setting.select.localizedOptions, true,
+            is Setting.PresetEqualizerProfileSelect -> profileCardsControl(
+                device, key, setting.select.options, setting.select.localizedOptions,
                 { (it as? Setting.PresetEqualizerProfileSelect)?.value },
                 { Value.OptionalStringValue(it) },
             )
@@ -1181,8 +1464,8 @@ class MainActivity : Activity() {
                 if (setting.setting.options.isEmpty()) {
                     infoControl(key, "(ריק)") { "(ריק)" }
                 } else {
-                    choiceControl(
-                        device, key, setting.setting.options, setting.setting.localizedOptions, true,
+                    selectControl(
+                        device, key, setting.setting.options, setting.setting.localizedOptions, true, pressRow,
                         { (it as? Setting.ModifiableSelectSetting)?.value },
                         { Value.OptionalStringValue(it) },
                     )
@@ -1193,6 +1476,9 @@ class MainActivity : Activity() {
                 } else {
                     multiControl(device, key, setting)
                 }
+            is Setting.MultiSelectWithRemoveSetting -> removeListControl(device, key, setting)
+            is Setting.ImportStringSetting -> importControl(device, key, setting)
+            is Setting.Action -> actionControl(device, key)
             is Setting.InformationSetting -> infoControl(key, HebrewLabels.value(setting.translatedValue)) {
                 HebrewLabels.value((it as? Setting.InformationSetting)?.translatedValue ?: "")
             }
@@ -1210,7 +1496,9 @@ class MainActivity : Activity() {
     }
  
     // A line with the name on one side and the current value on the other.
+    // The air pressure gets its own light-blue box with a gauge, like the original app.
     private fun infoControl(key: String, initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
+        if (keyNorm(key).contains("airpressure")) return pressureControl(initial, textOf)
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.setPadding(8, 12, 8, 12)
@@ -1225,6 +1513,30 @@ class MainActivity : Activity() {
         row.addView(name, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         return Pair(row, { s -> value.text = textOf(s) })
+    }
+ 
+    private fun pressureControl(initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.HORIZONTAL
+        box.gravity = Gravity.CENTER_VERTICAL
+        box.background = UiStyle.rounded(UiStyle.blueLight, dpi(12f).toFloat())
+        box.setPadding(dpi(10f), dpi(10f), dpi(10f), dpi(10f))
+ 
+        val iconHolder = LinearLayout(this)
+        iconHolder.gravity = Gravity.CENTER
+        iconHolder.background = UiStyle.rounded(0xFFCDEEFA.toInt(), dpi(22f).toFloat())
+        iconHolder.addView(IconView(this, IconKind.GAUGE, UiStyle.blue), LinearLayout.LayoutParams(dpi(26f), dpi(26f)))
+        val iconParams = LinearLayout.LayoutParams(dpi(44f), dpi(44f))
+        iconParams.marginEnd = dpi(10f)
+        box.addView(iconHolder, iconParams)
+ 
+        val texts = LinearLayout(this)
+        texts.orientation = LinearLayout.VERTICAL
+        val value = smallText(initial, 15f, UiStyle.textPrimary, true)
+        texts.addView(value, matchWrap())
+        texts.addView(smallText("לחץ אוויר נוכחי", 11f, UiStyle.textSecondary), matchWrap())
+        box.addView(texts, weightParams())
+        return Pair(box, { s -> value.text = textOf(s) })
     }
  
     private fun toggleControl(device: Any, key: String, setting: Setting.ToggleSetting): Pair<View, (Any?) -> Unit> {
@@ -1250,6 +1562,121 @@ class MainActivity : Activity() {
             if (s is Setting.ToggleSetting) box.isChecked = s.value
         }
         return Pair(box, updater)
+    }
+ 
+    // A button that runs a one-time action (for example resetting the earbud buttons), after a confirmation.
+    // The core does not say which value an Action expects, so true is sent. If it does not work, the log shows why.
+    private fun actionControl(device: Any, key: String): Pair<View, (Any?) -> Unit> {
+        val name = settingName(key)
+        val row = UiStyle.row(this, name) {
+            AlertDialog.Builder(this)
+                .setTitle(name)
+                .setMessage("לבצע את הפעולה?")
+                .setPositiveButton("כן") { _, _ ->
+                    sendValue(device, key, Value.BoolValue(true), name)
+                }
+                .setNegativeButton("לא", null)
+                .show()
+        }
+        row.value.visibility = View.GONE
+        val updater: (Any?) -> Unit = { }
+        return Pair(row.root, updater)
+    }
+ 
+    // A button that opens a box for pasting text, and sends the text to the earbuds' core (for example a
+    // list of equalizer profiles to import).
+    private fun importControl(
+        device: Any,
+        key: String,
+        setting: Setting.ImportStringSetting,
+    ): Pair<View, (Any?) -> Unit> {
+        val name = settingName(key)
+        val row = UiStyle.row(this, name) {
+            val input = EditText(this)
+            input.hint = "הדבק כאן את הטקסט לייבוא"
+            val builder = AlertDialog.Builder(this)
+            builder.setTitle(name)
+            val message = setting.confirmationMessage
+            if (message != null) {
+                builder.setMessage("שים לב: ייבוא ידרוס פרופילים קיימים בעלי אותו שם.\n\n$message")
+            }
+            builder.setView(input)
+            builder.setPositiveButton("ייבא") { _, _ ->
+                val text = input.text.toString().trim()
+                if (text.isEmpty()) {
+                    toast("לא הוזן טקסט")
+                } else {
+                    sendValue(device, key, Value.StringValue(text), name)
+                }
+            }
+            builder.setNegativeButton("ביטול", null)
+            builder.show()
+        }
+        row.value.visibility = View.GONE
+        val updater: (Any?) -> Unit = { }
+        return Pair(row.root, updater)
+    }
+ 
+    // A list with a "remove" button next to every item (for example the devices in dual connections).
+    // The list is rebuilt only when it changes, so the focus on a keypad phone does not jump every refresh.
+    private fun removeListControl(
+        device: Any,
+        key: String,
+        setting: Setting.MultiSelectWithRemoveSetting,
+    ): Pair<View, (Any?) -> Unit> {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.addView(controlTitle(settingName(key)), matchWrap())
+        val rows = LinearLayout(this)
+        rows.orientation = LinearLayout.VERTICAL
+        root.addView(rows, matchWrap())
+ 
+        val options = setting.setting.options
+        val labels = setting.setting.localizedOptions
+        fun labelOf(name: String): String {
+            val index = options.indexOf(name)
+            return if (index >= 0) labels.getOrElse(index) { name } else name
+        }
+ 
+        var shown: List<String>? = null
+        fun render(values: List<String>) {
+            if (values == shown) return
+            shown = values
+            rows.removeAllViews()
+            if (values.isEmpty()) {
+                rows.addView(smallText("(ריק)", 12f, UiStyle.textSecondary), matchWrap())
+                return
+            }
+            values.forEach { name ->
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.gravity = Gravity.CENTER_VERTICAL
+                val text = smallText(labelOf(name), 13f, UiStyle.textPrimary)
+                val remove = UiStyle.primaryButton(this, "הסר") {
+                    AlertDialog.Builder(this)
+                        .setTitle(settingName(key))
+                        .setMessage("להסיר את ${labelOf(name)}?")
+                        .setPositiveButton("הסר") { _, _ ->
+                            sendValue(
+                                device,
+                                key,
+                                MultiSelectWithRemoveCommandInner.Remove(name).toValue(),
+                                "${settingName(key)} – הוסר ${labelOf(name)}",
+                            )
+                        }
+                        .setNegativeButton("ביטול", null)
+                        .show()
+                }
+                row.addView(text, weightParams())
+                row.addView(remove, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                rows.addView(row, matchWrap())
+            }
+        }
+        render(setting.values)
+        val updater: (Any?) -> Unit = { s ->
+            if (s is Setting.MultiSelectWithRemoveSetting) render(s.values)
+        }
+        return Pair(root, updater)
     }
  
     // A range with up to 10 steps becomes a bar of numbered segments (like the original's level bar);
@@ -1368,8 +1795,203 @@ class MainActivity : Activity() {
         return Pair(root, updater)
     }
  
-    // Up to 4 options: a row of buttons. More options: a row with the current choice that opens a list (like the
-    // original app's button settings and equalizer profiles). With allowNone, "ללא" selects "no value".
+    // ---------- choices ----------
+ 
+    // A sheet that slides up from the bottom with a list of options and a round mark at the chosen one.
+    private fun showSheet(title: String, labels: List<String>, checked: Int, onPick: (Int) -> Unit) {
+        val dialog = Dialog(this, android.R.style.Theme_Holo_Light_Dialog_NoActionBar)
+        val sheet = LinearLayout(this)
+        sheet.orientation = LinearLayout.VERTICAL
+        rtl(sheet)
+        val radius = dpi(18f).toFloat()
+        val background = GradientDrawable()
+        background.setColor(UiStyle.card)
+        background.cornerRadii = floatArrayOf(radius, radius, radius, radius, 0f, 0f, 0f, 0f)
+        sheet.background = background
+        sheet.setPadding(dpi(12f), dpi(14f), dpi(12f), dpi(12f))
+        sheet.addView(smallText(title, 16f, UiStyle.textPrimary, true), matchWrap())
+ 
+        val list = LinearLayout(this)
+        list.orientation = LinearLayout.VERTICAL
+        labels.forEachIndexed { i, label ->
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            row.isFocusable = true
+            row.isClickable = true
+            row.background = UiStyle.focusable(this, UiStyle.card, 8f)
+            row.setPadding(dpi(8f), dpi(10f), dpi(8f), dpi(10f))
+            row.addView(smallText(label, 14f, UiStyle.textPrimary, i == checked), weightParams())
+            val dot = RadioDot(this)
+            dot.checked = i == checked
+            row.addView(dot)
+            row.setOnClickListener {
+                dialog.dismiss()
+                onPick(i)
+            }
+            list.addView(row, matchWrap())
+        }
+        val scroll = ScrollView(this)
+        scroll.addView(list)
+        sheet.addView(scroll, matchWrap())
+ 
+        dialog.setContentView(sheet)
+        val window = dialog.window
+        if (window != null) {
+            window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            window.setGravity(Gravity.BOTTOM)
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        dialog.show()
+    }
+ 
+    private fun pressIcon(key: String): IconKind {
+        val k = keyNorm(key)
+        return when {
+            k.contains("slide") -> IconKind.SLIDE
+            k.contains("triple") -> IconKind.DOT3
+            k.contains("double") -> IconKind.DOT2
+            k.contains("long") -> IconKind.LINE
+            else -> IconKind.DOT1
+        }
+    }
+ 
+    // A button setting like in the original app: an icon for the kind of press, its name, the current action
+    // underneath and an arrow. Opens a sheet with the possible actions.
+    private fun pressRowControl(
+        device: Any,
+        key: String,
+        options: List<String>,
+        labels: List<String>,
+        allowNone: Boolean,
+        currentOf: (Any?) -> String?,
+        makeValue: (String?) -> Value,
+    ): Pair<View, (Any?) -> Unit> {
+        val title = settingName(key).substringAfter(" – ")
+        val entries = entriesOf(options, labels, allowNone)
+        var currentOption: String? = null
+ 
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.isFocusable = true
+        row.isClickable = true
+        row.background = UiStyle.focusable(this, UiStyle.card, 8f)
+        row.setPadding(dpi(8f), dpi(10f), dpi(8f), dpi(10f))
+ 
+        val iconParams = LinearLayout.LayoutParams(dpi(24f), dpi(24f))
+        iconParams.marginEnd = dpi(12f)
+        row.addView(IconView(this, pressIcon(key), UiStyle.blue), iconParams)
+ 
+        val column = LinearLayout(this)
+        column.orientation = LinearLayout.VERTICAL
+        column.addView(smallText(title, 14f, UiStyle.textPrimary))
+        val subtitle = smallText("", 12f, UiStyle.textSecondary)
+        column.addView(subtitle)
+        row.addView(column, weightParams())
+        row.addView(IconView(this, IconKind.CHEVRON, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
+ 
+        row.setOnClickListener {
+            val checked = entries.indexOfFirst { it.first == currentOption }
+            showSheet(title, entries.map { it.second }, checked) { which ->
+                val option = entries[which].first
+                currentOption = option
+                subtitle.text = entries[which].second
+                sendValue(device, key, makeValue(option), "$title = ${entries[which].second}")
+            }
+        }
+        val updater: (Any?) -> Unit = { s ->
+            currentOption = currentOf(s)
+            subtitle.text = entries.firstOrNull { it.first == currentOption }?.second ?: ""
+        }
+        return Pair(row, updater)
+    }
+ 
+    // A background for the cards of the equalizer profiles: the chosen one in the blue gradient.
+    private fun profileBackground(selected: Boolean): StateListDrawable {
+        val radius = dpi(12f).toFloat()
+        val stroke = dpi(2f)
+        if (!selected) return UiStyle.focusable(this, UiStyle.card, 12f)
+        val colors = intArrayOf(0xFF55D2FF.toInt(), 0xFF2B9FF4.toInt())
+        val focused = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors)
+        focused.cornerRadius = radius
+        focused.setStroke(stroke, UiStyle.blueDark)
+        val normal = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors)
+        normal.cornerRadius = radius
+        val states = StateListDrawable()
+        states.addState(intArrayOf(android.R.attr.state_focused), focused)
+        states.addState(intArrayOf(android.R.attr.state_pressed), focused)
+        states.addState(intArrayOf(), normal)
+        return states
+    }
+ 
+    // The equalizer profiles as a list of cards (like the "Sounds" list of the original app).
+    private fun profileCardsControl(
+        device: Any,
+        key: String,
+        options: List<String>,
+        labels: List<String>,
+        currentOf: (Any?) -> String?,
+        makeValue: (String?) -> Value,
+    ): Pair<View, (Any?) -> Unit> {
+        val title = settingName(key)
+        val entries = entriesOf(options, labels, true, "מותאם אישית")
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.addView(controlTitle(title), matchWrap())
+ 
+        val cards = ArrayList<ProfileCard>()
+        fun highlight(current: String?) {
+            cards.forEach { c ->
+                val selected = c.option == current
+                c.root.background = profileBackground(selected)
+                c.icon.setTint(if (selected) Color.WHITE else UiStyle.blue)
+                c.title.setTextColor(if (selected) Color.WHITE else UiStyle.textPrimary)
+                c.title.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+                val markRadius = dpi(11f).toFloat()
+                c.mark.background = if (selected) {
+                    UiStyle.rounded(0x33FFFFFF, markRadius, Color.WHITE, dpi(2f))
+                } else {
+                    UiStyle.rounded(Color.WHITE, markRadius, UiStyle.track, dpi(2f))
+                }
+                c.mark.setTint(if (selected) Color.WHITE else Color.TRANSPARENT)
+            }
+        }
+ 
+        entries.forEach { (option, label) ->
+            val card = LinearLayout(this)
+            card.orientation = LinearLayout.HORIZONTAL
+            card.gravity = Gravity.CENTER_VERTICAL
+            card.isFocusable = true
+            card.isClickable = true
+            card.setPadding(dpi(12f), dpi(12f), dpi(12f), dpi(12f))
+            val icon = IconView(this, IconKind.EQUALIZER, UiStyle.blue)
+            val iconParams = LinearLayout.LayoutParams(dpi(24f), dpi(24f))
+            iconParams.marginEnd = dpi(10f)
+            card.addView(icon, iconParams)
+            val text = smallText(label, 14f, UiStyle.textPrimary)
+            card.addView(text, weightParams())
+            val mark = IconView(this, IconKind.CHECK_SMALL, Color.TRANSPARENT)
+            card.addView(mark, LinearLayout.LayoutParams(dpi(22f), dpi(22f)))
+            card.setOnClickListener {
+                if (!updatingUi) {
+                    sendValue(device, key, makeValue(option), "$title = $label")
+                    highlight(option)
+                }
+            }
+            cards.add(ProfileCard(option, card, icon, text, mark))
+            val params = matchWrap()
+            params.setMargins(0, dpi(3f), 0, dpi(3f))
+            root.addView(card, params)
+        }
+        highlight(null)
+ 
+        val updater: (Any?) -> Unit = { s -> highlight(currentOf(s)) }
+        return Pair(root, updater)
+    }
+ 
+    // Up to 2 options (or a refresh rate): a row of rounded buttons. 3 or 4 options: rows with a round mark. More
+    // options: a row with the current choice that opens a sheet. With allowNone, "ללא" selects "no value".
     private fun choiceControl(
         device: Any,
         key: String,
@@ -1380,29 +2002,19 @@ class MainActivity : Activity() {
         makeValue: (String?) -> Value,
     ): Pair<View, (Any?) -> Unit> {
         val title = settingName(key)
-        val entries = ArrayList<Pair<String?, String>>()
-        options.forEachIndexed { i, option ->
-            entries.add(Pair(option, optionText(option, labels.getOrElse(i) { option })))
-        }
-        if (allowNone) entries.add(Pair(null, "ללא"))
+        val entries = entriesOf(options, labels, allowNone)
  
         if (entries.size > 4) {
             var currentOption: String? = null
             var valueView: TextView? = null
             val rowViews = UiStyle.row(this, title) {
-                val names = Array<CharSequence>(entries.size) { entries[it].second }
                 val checked = entries.indexOfFirst { it.first == currentOption }
-                AlertDialog.Builder(this)
-                    .setTitle(title)
-                    .setSingleChoiceItems(names, checked) { dialog, which ->
-                        val option = entries[which].first
-                        currentOption = option
-                        valueView?.text = entries[which].second
-                        sendValue(device, key, makeValue(option), "$title = ${entries[which].second}")
-                        dialog.dismiss()
-                    }
-                    .setNegativeButton("ביטול", null)
-                    .show()
+                showSheet(title, entries.map { it.second }, checked) { which ->
+                    val option = entries[which].first
+                    currentOption = option
+                    valueView?.text = entries[which].second
+                    sendValue(device, key, makeValue(option), "$title = ${entries[which].second}")
+                }
             }
             valueView = rowViews.value
             val updater: (Any?) -> Unit = { s ->
@@ -1416,27 +2028,60 @@ class MainActivity : Activity() {
         root.orientation = LinearLayout.VERTICAL
         root.addView(controlTitle(title), matchWrap())
  
-        val pills = ArrayList<Pair<String?, Button>>()
-        fun highlight(current: String?) {
-            pills.forEach { UiStyle.setPillSelected(this, it.second, it.first == current) }
+        if (entries.size <= 2 || keyNorm(key).contains("refreshrate")) {
+            val pills = ArrayList<Pair<String?, Button>>()
+            fun highlightPills(current: String?) {
+                pills.forEach { UiStyle.setPillSelected(this, it.second, it.first == current) }
+            }
+            val buttonRow = LinearLayout(this)
+            buttonRow.orientation = LinearLayout.HORIZONTAL
+            val margin = dpi(3f)
+            entries.forEach { (option, label) ->
+                val pill = UiStyle.pill(this, label) {
+                    if (!updatingUi) {
+                        sendValue(device, key, makeValue(option), "$title = $label")
+                        highlightPills(option)
+                    }
+                }
+                val params = weightParams()
+                params.setMargins(margin, margin, margin, margin)
+                buttonRow.addView(pill, params)
+                pills.add(Pair(option, pill))
+            }
+            root.addView(buttonRow, matchWrap())
+            val updater: (Any?) -> Unit = { s -> highlightPills(currentOf(s)) }
+            return Pair(root, updater)
         }
-        val buttonRow = LinearLayout(this)
-        buttonRow.orientation = LinearLayout.HORIZONTAL
-        val margin = UiStyle.dp(this, 3f)
+ 
+        val items = ArrayList<RadioItem>()
+        fun highlight(current: String?) {
+            items.forEach {
+                val selected = it.option == current
+                it.dot.checked = selected
+                it.label.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+            }
+        }
         entries.forEach { (option, label) ->
-            val pill = UiStyle.pill(this, label) {
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            row.isFocusable = true
+            row.isClickable = true
+            row.background = UiStyle.focusable(this, UiStyle.card, 8f)
+            row.setPadding(dpi(8f), dpi(8f), dpi(8f), dpi(8f))
+            val text = smallText(label, 14f, UiStyle.textPrimary)
+            val dot = RadioDot(this)
+            row.addView(text, weightParams())
+            row.addView(dot)
+            row.setOnClickListener {
                 if (!updatingUi) {
                     sendValue(device, key, makeValue(option), "$title = $label")
                     highlight(option)
                 }
             }
-            val params = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            params.setMargins(margin, margin, margin, margin)
-            buttonRow.addView(pill, params)
-            pills.add(Pair(option, pill))
+            items.add(RadioItem(option, row, dot, text))
+            root.addView(row, matchWrap())
         }
-        root.addView(buttonRow, matchWrap())
- 
         val updater: (Any?) -> Unit = { s -> highlight(currentOf(s)) }
         return Pair(root, updater)
     }
@@ -1476,21 +2121,25 @@ class MainActivity : Activity() {
         return Pair(root, updater)
     }
  
-    // ---------- ambient sound bar ----------
+    // ---------- ambient sound card ----------
  
-    private val ambientKeys = setOf("ambientsoundmode", "manualnoisecanceling", "manualnoisecancelling", "manualtransparency")
- 
-    // The original app's single bar for ambient sound, made from three settings: the mode and the two level settings.
-    // Left: transparency (the far left is the strongest). Middle: normal. Right: noise canceling (the far right,
-    // 10, is the strongest). Choosing a segment sends the mode and the level together.
+    // The first card of the sound tab, like the original app: two options with a round mark.
+    // "Ambient sound" shows one bar of 11 segments: transparency 1-5 on the left (1 is the strongest), a person icon
+    // for "normal" in the middle and noise canceling 6-10 on the right (10 is the strongest). Under the bar are
+    // "transparency" on the left, the current mode in the middle and "noise canceling" on the right.
+    // "Airplane mode" shows the current air pressure and, when chosen, how the pressure is updated.
+    // Choosing something sends the mode (and the level) to the earbuds together.
     private inner class AmbientBar(
         private val device: Any,
         private val modeKey: String,
         private val ancKey: String,
         private val transKey: String?,
+        private val airplaneKey: String?,
         mode: Setting.SelectSetting,
         anc: Setting.I32RangeSetting,
         trans: Setting.I32RangeSetting?,
+        airplane: Setting.SelectSetting?,
+        pressure: Setting.InformationSetting?,
     ) {
         private val modeOptions: List<String> = mode.setting.options
         private val ancStart = anc.setting.start
@@ -1501,35 +2150,120 @@ class MainActivity : Activity() {
         private val transCount = if (trans == null) 5 else (trans.setting.end - transStart) / transStep + 1
         private var lastTransLevel = transCount
         private var lastAncLevel = ancCount
+        private var lastAmbientOption: String? = null
+        private var airplaneSelected = false
  
+        // The empty label in the middle is drawn as a small person icon.
         private val bar = SegmentBar(
             this@MainActivity,
-            (1..transCount).map { it.toString() } + "רגיל" + (transCount + 1..transCount + ancCount).map { it.toString() },
+            (1..transCount).map { it.toString() } + "" + (transCount + 1..transCount + ancCount).map { it.toString() },
         )
+        private val ambientDot = RadioDot(this@MainActivity)
+        private val airplaneDot = RadioDot(this@MainActivity)
+        private val currentCaption = smallText("", 12f, UiStyle.textSecondary)
+        private val barBox = LinearLayout(this@MainActivity)
+        private val airplaneBox = LinearLayout(this@MainActivity)
+        private val airplaneSubtitle = smallText("", 12f, UiStyle.textSecondary)
+        private val airplanePills = ArrayList<Pair<String, Button>>()
+        private var pressureUpdater: ((Any?) -> Unit)? = null
         val view: LinearLayout = LinearLayout(this@MainActivity)
  
         init {
             view.orientation = LinearLayout.VERTICAL
-            view.addView(controlTitle("צליל סביבה"), matchWrap())
-            view.addView(bar, matchWrap())
+ 
+            // Ambient sound: the round mark, the bar and the captions under it.
+            view.addView(
+                radioRow(ambientDot, "סאונד סביבתי", null) {
+                    if (airplaneSelected) setMode(lastAmbientOption ?: optionFor("normal"))
+                },
+                matchWrap(),
+            )
+            barBox.orientation = LinearLayout.VERTICAL
+            barBox.addView(bar, matchWrap())
             val captions = LinearLayout(this@MainActivity)
             captions.orientation = LinearLayout.HORIZONTAL
             captions.layoutDirection = View.LAYOUT_DIRECTION_LTR
-            for ((text, gravity) in listOf("שקיפות" to Gravity.START, "ביטול רעש" to Gravity.END)) {
-                val caption = TextView(this@MainActivity)
-                caption.text = text
-                caption.textSize = 11f
-                caption.gravity = gravity
-                caption.setTextColor(UiStyle.textSecondary)
-                caption.setPadding(8, 0, 8, 4)
-                captions.addView(caption, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            }
-            view.addView(captions, matchWrap())
+            val leftCaption = smallText("שקיפות", 11f, UiStyle.textSecondary)
+            leftCaption.gravity = Gravity.START
+            currentCaption.gravity = Gravity.CENTER
+            val rightCaption = smallText("ביטול רעש", 11f, UiStyle.textSecondary)
+            rightCaption.gravity = Gravity.END
+            captions.addView(leftCaption, weightParams())
+            captions.addView(currentCaption, weightParams())
+            captions.addView(rightCaption, weightParams())
+            captions.setPadding(dpi(8f), 0, dpi(8f), dpi(4f))
+            barBox.addView(captions, matchWrap())
+            view.addView(barBox, matchWrap())
             bar.onCommit = { index -> send(index) }
+ 
+            view.addView(UiStyle.divider(this@MainActivity), UiStyle.dividerParams(this@MainActivity))
+ 
+            // Airplane mode: the round mark with the current pressure, and the update choice when chosen.
+            view.addView(
+                radioRow(airplaneDot, "מצב טיסה", airplaneSubtitle) {
+                    if (!airplaneSelected) setMode(optionFor("airplane"))
+                },
+                matchWrap(),
+            )
+            airplaneBox.orientation = LinearLayout.VERTICAL
+            if (airplane != null && airplaneKey != null) {
+                val pillRow = LinearLayout(this@MainActivity)
+                pillRow.orientation = LinearLayout.HORIZONTAL
+                val margin = dpi(3f)
+                val localized = airplane.setting.localizedOptions
+                airplane.setting.options.forEachIndexed { i, option ->
+                    val label = optionText(option, localized.getOrElse(i) { option })
+                    val pill = UiStyle.pill(this@MainActivity, label) {
+                        sendValue(device, airplaneKey, Value.StringValue(option), label)
+                    }
+                    val params = weightParams()
+                    params.setMargins(margin, margin, margin, margin)
+                    pillRow.addView(pill, params)
+                    airplanePills.add(Pair(option, pill))
+                }
+                airplaneBox.addView(pillRow, matchWrap())
+            }
+            if (pressure != null) {
+                val box = pressureControl(HebrewLabels.value(pressure.translatedValue)) {
+                    HebrewLabels.value((it as? Setting.InformationSetting)?.translatedValue ?: "")
+                }
+                pressureUpdater = box.second
+                val params = matchWrap()
+                params.setMargins(dpi(4f), dpi(6f), dpi(4f), dpi(4f))
+                airplaneBox.addView(box.first, params)
+            }
+            airplaneBox.visibility = View.GONE
+            view.addView(airplaneBox, matchWrap())
+        }
+ 
+        // A row with a round mark, a title and (optionally) a line of gray text under the title.
+        private fun radioRow(dot: RadioDot, title: String, subtitle: TextView?, onClick: () -> Unit): LinearLayout {
+            val row = LinearLayout(this@MainActivity)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            row.isFocusable = true
+            row.isClickable = true
+            row.background = UiStyle.focusable(this@MainActivity, UiStyle.card, 8f)
+            row.setPadding(dpi(8f), dpi(10f), dpi(8f), dpi(10f))
+            row.addView(dot)
+            val column = LinearLayout(this@MainActivity)
+            column.orientation = LinearLayout.VERTICAL
+            column.addView(smallText(title, 16f, UiStyle.textPrimary))
+            if (subtitle != null) column.addView(subtitle)
+            val params = weightParams()
+            params.marginStart = dpi(10f)
+            row.addView(column, params)
+            row.setOnClickListener { onClick() }
+            return row
         }
  
         private fun optionFor(fragment: String): String? =
             modeOptions.firstOrNull { it.lowercase(Locale.US).contains(fragment) }
+ 
+        private fun setMode(option: String?) {
+            if (option == null) return
+            sendValue(device, modeKey, Value.StringValue(option), "סאונד סביבתי")
+        }
  
         private fun send(index: Int) {
             val pairs = ArrayList<SettingIdValuePair>()
@@ -1556,15 +2290,48 @@ class MainActivity : Activity() {
             sendValues(device, pairs, description)
         }
  
-        // Moves the bar to the state reported by the device.
-        fun update(mode: Setting.SelectSetting?, anc: Setting.I32RangeSetting?, trans: Setting.I32RangeSetting?) {
+        // Moves everything to the state reported by the device.
+        fun update(
+            mode: Setting.SelectSetting?,
+            anc: Setting.I32RangeSetting?,
+            trans: Setting.I32RangeSetting?,
+            airplane: Setting.SelectSetting?,
+            pressure: Setting.InformationSetting?,
+        ) {
             if (anc != null) lastAncLevel = ((anc.value - ancStart) / ancStep + 1).coerceIn(1, ancCount)
             if (trans != null) lastTransLevel = ((trans.value - transStart) / transStep + 1).coerceIn(1, transCount)
-            val current = mode?.value?.lowercase(Locale.US) ?: return
-            when {
-                current.contains("transparen") -> bar.setLevelFromDevice(transCount - lastTransLevel)
-                current.contains("normal") -> bar.setLevelFromDevice(transCount)
-                current.contains("noise") -> bar.setLevelFromDevice(transCount + lastAncLevel)
+            val modeValue = mode?.value
+            if (modeValue != null) {
+                val current = modeValue.lowercase(Locale.US)
+                airplaneSelected = current.contains("airplane")
+                ambientDot.checked = !airplaneSelected
+                airplaneDot.checked = airplaneSelected
+                barBox.visibility = if (airplaneSelected) View.GONE else View.VISIBLE
+                airplaneBox.visibility = if (airplaneSelected) View.VISIBLE else View.GONE
+                airplaneSubtitle.visibility = if (airplaneSelected) View.GONE else View.VISIBLE
+                if (!airplaneSelected) lastAmbientOption = modeValue
+                when {
+                    current.contains("transparen") -> {
+                        bar.setLevelFromDevice(transCount - lastTransLevel)
+                        currentCaption.text = "שקיפות"
+                    }
+                    current.contains("normal") -> {
+                        bar.setLevelFromDevice(transCount)
+                        currentCaption.text = "רגיל"
+                    }
+                    current.contains("noise") -> {
+                        bar.setLevelFromDevice(transCount + lastAncLevel)
+                        currentCaption.text = "ביטול רעש"
+                    }
+                }
+            }
+            if (pressure != null) {
+                airplaneSubtitle.text = "לחץ אוויר נוכחי: " + HebrewLabels.value(pressure.translatedValue)
+                pressureUpdater?.invoke(pressure)
+            }
+            if (airplane != null) {
+                val chosen = airplane.value
+                airplanePills.forEach { UiStyle.setPillSelected(this@MainActivity, it.second, it.first == chosen) }
             }
         }
     }
@@ -1574,21 +2341,36 @@ class MainActivity : Activity() {
         val modeItem = find("ambientsoundmode")
         val ancItem = find("manualnoisecanceling", "manualnoisecancelling")
         val transItem = find("manualtransparency")
+        val airplaneItem = find("airplanemode")
+        val pressureItem = find("airpressure")
         val mode = modeItem?.setting as? Setting.SelectSetting
         val anc = ancItem?.setting as? Setting.I32RangeSetting
         val trans = transItem?.setting as? Setting.I32RangeSetting
+        val airplane = airplaneItem?.setting as? Setting.SelectSetting
+        val pressure = pressureItem?.setting as? Setting.InformationSetting
         if (ambientBar == null) {
             if (modeItem == null || ancItem == null || mode == null || anc == null) return
-            val created = AmbientBar(device, modeItem.key, ancItem.key, transItem?.key, mode, anc, trans)
+            val created = AmbientBar(
+                device, modeItem.key, ancItem.key, transItem?.key,
+                if (airplane != null) airplaneItem?.key else null,
+                mode, anc, trans, airplane, pressure,
+            )
             ambientBar = created
+            ambientHandled.add(keyNorm(modeItem.key))
+            ambientHandled.add(keyNorm(ancItem.key))
+            if (transItem != null) ambientHandled.add(keyNorm(transItem.key))
+            if (airplane != null && airplaneItem != null) ambientHandled.add(keyNorm(airplaneItem.key))
+            if (pressure != null && pressureItem != null) ambientHandled.add(keyNorm(pressureItem.key))
             val card = sectionCard(modeItem.category)
             if (card.childCount > 0) card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
             card.addView(created.view, matchWrap())
         }
-        ambientBar?.update(mode, anc, trans)
+        ambientBar?.update(mode, anc, trans, airplane, pressure)
     }
  
     // ---------- lifecycle ----------
+ 
+    private val APP_VERSION = "v13-צליל סביבה"
  
     override fun onCreate(savedInstanceState: Bundle?) {
         // A light theme without the system title bar (the app draws its own top bars).
@@ -1602,7 +2384,7 @@ class MainActivity : Activity() {
         registerReceiver(scanReceiver, filter)
  
         showList()
-        line("גרסה: v11-פס צליל")
+        line("גרסה: $APP_VERSION")
         line("גרסת אנדרואיד (SDK): ${Build.VERSION.SDK_INT}")
  
         try {
@@ -1668,7 +2450,9 @@ class MainActivity : Activity() {
                 }
             }
             Screen.PICKER -> showList()
-            Screen.LIST -> super.onBackPressed()
+            Screen.LIST -> {
+                if (listTab != ListTab.DEVICES) showListTab(ListTab.DEVICES) else super.onBackPressed()
+            }
         }
     }
  
@@ -1687,4 +2471,3 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 }
- 
