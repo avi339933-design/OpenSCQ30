@@ -238,7 +238,3 @@ class IconView(context: Context, private val kind: IconKind, tint: Int) : View(c
     }
 }
  
-
-
-
-
