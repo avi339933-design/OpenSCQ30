@@ -96,7 +96,7 @@ object UiStyle {
         return button
     }
  
-    // Blue text without a fill (used in the top bar).
+    // Blue text without a fill.
     fun textButton(context: Context, label: String, onClick: () -> Unit): TextView {
         val view = TextView(context)
         view.text = label
@@ -163,11 +163,8 @@ object UiStyle {
         column.addView(valueView)
         root.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
  
-        val arrow = TextView(context)
-        arrow.text = "‹"
-        arrow.textSize = 22f
-        arrow.setTextColor(textSecondary)
-        root.addView(arrow)
+        // The arrow is drawn (not a text character), so it looks the same on every Android version.
+        root.addView(IconView(context, IconKind.CHEVRON, textSecondary), LinearLayout.LayoutParams(dp(context, 18f), dp(context, 18f)))
  
         root.setOnClickListener { onClick() }
         return RowViews(root, valueView)
