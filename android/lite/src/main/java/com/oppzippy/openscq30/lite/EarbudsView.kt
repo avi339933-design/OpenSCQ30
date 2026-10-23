@@ -7,35 +7,183 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.view.View
 import java.util.Locale
+import kotlin.math.max
+import kotlin.math.min
  
 /**
- * Shows the connected device like the original app: the left earbud on the left, the case in the middle and the
- * right earbud on the right, each with its battery level underneath.
- *
- * Pictures come from the assets folder, named after the model id (lower case), see setModel():
- *   assets/devices/<model id>_earbud.png   one earbud (the left one is drawn mirrored)
- *   assets/devices/<model id>_case.png     the charging case
- * A model without pictures gets a simple drawing instead. Models without a case (or headphones) are laid out
- * according to the battery values that the device reports.
+ * Pictures of the devices. The picture of a model is looked up in this order:
+ *   1. assets/devices/<model id in lower case>_hero.png   (add this file to show another model)
+ *   2. the built-in Liberty 4 Pro picture (EarbudsImage.kt) for model ids that contain "a3954"
+ *   3. nothing: a simple drawing is shown instead.
+ */
+object DevicePictures {
+    private val cache = HashMap<String, Bitmap?>()
+ 
+    fun hero(context: Context, modelId: String): Bitmap? {
+        val key = modelId.lowercase(Locale.US)
+        if (cache.containsKey(key)) return cache[key]
+        var bitmap: Bitmap? = try {
+            context.assets.open("devices/${key}_hero.png").use { BitmapFactory.decodeStream(it) }
+        } catch (_: Throwable) {
+            null
+        }
+        if (bitmap == null && key.contains("a3954")) bitmap = EarbudsImage.bitmap()
+        cache[key] = bitmap
+        return bitmap
+    }
+}
+ 
+// Draws a device picture (or simple shapes when there is no picture) inside a rectangle.
+class PictureDrawer(private val density: Float) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val rect = RectF()
+ 
+    private fun dp(value: Float): Float = value * density
+ 
+    fun draw(canvas: Canvas, bitmap: Bitmap?, dst: RectF, headphones: Boolean = false) {
+        if (bitmap != null) {
+            drawFit(canvas, bitmap, dst)
+        } else if (headphones) {
+            drawHeadphones(canvas, dst)
+        } else {
+            val caseDst = RectF(dst.left, dst.top, dst.left + dst.width() * 0.58f, dst.bottom)
+            val budDst = RectF(dst.left + dst.width() * 0.55f, dst.top, dst.right, dst.bottom)
+            drawCaseShape(canvas, caseDst)
+            drawEarbudShape(canvas, budDst)
+        }
+    }
+ 
+    private fun drawFit(canvas: Canvas, bitmap: Bitmap, dst: RectF) {
+        val scale = min(dst.width() / bitmap.width, dst.height() / bitmap.height)
+        val drawWidth = bitmap.width * scale
+        val drawHeight = bitmap.height * scale
+        rect.set(
+            dst.centerX() - drawWidth / 2f,
+            dst.centerY() - drawHeight / 2f,
+            dst.centerX() + drawWidth / 2f,
+            dst.centerY() + drawHeight / 2f,
+        )
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFFFFFFFF.toInt()
+        canvas.drawBitmap(bitmap, null, rect, paint)
+    }
+ 
+    private fun fillAndStroke(canvas: Canvas, draw: (Paint) -> Unit) {
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFFFFFFFF.toInt()
+        draw(paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = dp(1.5f)
+        paint.color = 0xFF9EA7B3.toInt()
+        draw(paint)
+        paint.style = Paint.Style.FILL
+    }
+ 
+    // A simple earbud with a stem, facing right (used when there is no picture for the model).
+    private fun drawEarbudShape(canvas: Canvas, dst: RectF) {
+        val size = min(dst.width(), dst.height())
+        val radius = size * 0.28f
+        val bodyX = dst.centerX() - size * 0.05f
+        val bodyY = dst.top + size * 0.34f
+        val stemLeft = bodyX + radius * 0.35f
+        val stemRight = bodyX + radius * 0.95f
+        rect.set(stemLeft, bodyY, stemRight, bodyY + size * 0.62f)
+        val stemRadius = (stemRight - stemLeft) / 2f
+        fillAndStroke(canvas) { canvas.drawRoundRect(rect, stemRadius, stemRadius, it) }
+        fillAndStroke(canvas) { canvas.drawCircle(bodyX, bodyY, radius, it) }
+    }
+ 
+    // A simple charging case (used when there is no picture for the model).
+    private fun drawCaseShape(canvas: Canvas, dst: RectF) {
+        val size = min(dst.width(), dst.height())
+        val caseWidth = size * 0.95f
+        val caseHeight = size * 0.72f
+        rect.set(
+            dst.centerX() - caseWidth / 2f,
+            dst.centerY() - caseHeight / 2f,
+            dst.centerX() + caseWidth / 2f,
+            dst.centerY() + caseHeight / 2f,
+        )
+        val corner = size * 0.18f
+        fillAndStroke(canvas) { canvas.drawRoundRect(rect, corner, corner, it) }
+        val lidY = rect.top + caseHeight * 0.38f
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = dp(1.5f)
+        paint.color = 0xFF9EA7B3.toInt()
+        canvas.drawLine(rect.left + corner * 0.3f, lidY, rect.right - corner * 0.3f, lidY, paint)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF66BB6A.toInt()
+        canvas.drawCircle(dst.centerX(), lidY + caseHeight * 0.2f, dp(2.5f), paint)
+    }
+ 
+    // Headphones (no separate earbuds): a headband and two ear cups.
+    private fun drawHeadphones(canvas: Canvas, dst: RectF) {
+        val cx = dst.centerX()
+        val size = min(dst.width(), dst.height())
+        val top = dst.top + dp(4f)
+        rect.set(cx - size * 0.38f, top, cx + size * 0.38f, top + size * 0.8f)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = dp(5f)
+        paint.color = 0xFF9EA7B3.toInt()
+        canvas.drawArc(rect, 180f, 180f, false, paint)
+        paint.style = Paint.Style.FILL
+        val cupWidth = size * 0.2f
+        val cupHeight = size * 0.36f
+        val cupTop = top + size * 0.4f
+        paint.color = 0xFFFFFFFF.toInt()
+        rect.set(cx - size * 0.38f - cupWidth / 2f, cupTop, cx - size * 0.38f + cupWidth / 2f, cupTop + cupHeight)
+        canvas.drawRoundRect(rect, dp(6f), dp(6f), paint)
+        rect.set(cx + size * 0.38f - cupWidth / 2f, cupTop, cx + size * 0.38f + cupWidth / 2f, cupTop + cupHeight)
+        canvas.drawRoundRect(rect, dp(6f), dp(6f), paint)
+    }
+}
+ 
+// A small picture of the device, used on the "my devices" cards.
+class DevicePictureView(context: Context) : View(context) {
+    private val drawer = PictureDrawer(resources.displayMetrics.density)
+    private var modelId = ""
+    private var bitmap: Bitmap? = null
+ 
+    fun setModel(id: String) {
+        if (id == modelId) return
+        modelId = id
+        bitmap = if (id.isEmpty()) null else DevicePictures.hero(context, id)
+        invalidate()
+    }
+ 
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (width <= 0 || height <= 0) return
+        drawer.draw(canvas, bitmap, RectF(0f, 0f, width.toFloat(), height.toFloat()))
+    }
+}
+ 
+/**
+ * The top of the device screen, like the original app: a picture of the device on a pale blue shape, and a row of
+ * thin battery bars underneath (left earbud, right earbud, case) with a small icon and the percent.
+ * The order of the batteries is always left to right on the screen.
  */
 class EarbudsView(context: Context) : View(context) {
     companion object {
         private const val KIND_LEFT = 0
         private const val KIND_RIGHT = 1
         private const val KIND_CASE = 2
+        private const val KIND_SINGLE = 3
     }
  
     private val density = resources.displayMetrics.density
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val drawer = PictureDrawer(density)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val valuePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val letterPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
     private val path = Path()
  
     private var modelId = ""
-    private var earbudBitmap: Bitmap? = null
-    private var caseBitmap: Bitmap? = null
+    private var hero: Bitmap? = null
  
     private var leftPercent: Int? = null
     private var rightPercent: Int? = null
@@ -46,17 +194,19 @@ class EarbudsView(context: Context) : View(context) {
     private var caseCharging = false
  
     init {
-        textPaint.textAlign = Paint.Align.CENTER
-        textPaint.color = 0xFF3C4650.toInt()
+        valuePaint.textAlign = Paint.Align.LEFT
+        valuePaint.color = 0xFF1B1F24.toInt()
+        valuePaint.typeface = Typeface.DEFAULT_BOLD
+        letterPaint.textAlign = Paint.Align.CENTER
+        letterPaint.color = 0xFF6B7480.toInt()
+        letterPaint.typeface = Typeface.DEFAULT_BOLD
     }
  
     // The model id is the internal name shown in the log after connecting, for example "SoundcoreA3954".
     fun setModel(id: String) {
         if (id == modelId) return
         modelId = id
-        val key = id.lowercase(Locale.US)
-        earbudBitmap = loadAsset("devices/${key}_earbud.png")
-        caseBitmap = loadAsset("devices/${key}_case.png")
+        hero = if (id.isEmpty()) null else DevicePictures.hero(context, id)
         invalidate()
     }
  
@@ -79,181 +229,103 @@ class EarbudsView(context: Context) : View(context) {
         invalidate()
     }
  
-    private fun loadAsset(name: String): Bitmap? = try {
-        context.assets.open(name).use { BitmapFactory.decodeStream(it) }
-    } catch (_: Throwable) {
-        null
-    }
- 
     private fun dp(value: Float): Float = value * density
  
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width.toFloat()
-        if (w <= 0f || height <= 0) return
+        val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return
  
-        val noData = leftPercent == null && rightPercent == null && casePercent == null && singlePercent == null
-        val hasEarbuds = leftPercent != null || rightPercent != null || noData
-        if (!hasEarbuds && singlePercent != null) {
-            drawHeadphones(canvas, w / 2f, w * 0.6f)
-            return
+        val pictureBottom = h - dp(38f)
+ 
+        // The pale shape behind the picture (on the right, like the original app).
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFFE6F6FD.toInt()
+        canvas.drawCircle(w * 0.74f, pictureBottom * 0.5f + dp(6f), pictureBottom * 0.5f, paint)
+ 
+        val headphonesOnly = leftPercent == null && rightPercent == null && casePercent == null &&
+            singlePercent != null
+        val dst = RectF(w * 0.14f, dp(6f), w * 0.68f, pictureBottom)
+        drawer.draw(canvas, hero, dst, headphonesOnly)
+ 
+        // The battery items, from left to right.
+        val items = ArrayList<IntArray>() // kind, percent, charging (0/1)
+        leftPercent?.let { items.add(intArrayOf(KIND_LEFT, it, if (leftCharging) 1 else 0)) }
+        rightPercent?.let { items.add(intArrayOf(KIND_RIGHT, it, if (rightCharging) 1 else 0)) }
+        casePercent?.let { items.add(intArrayOf(KIND_CASE, it, if (caseCharging) 1 else 0)) }
+        if (items.isEmpty()) {
+            singlePercent?.let { items.add(intArrayOf(KIND_SINGLE, it, 0)) }
         }
-        val hasCase = casePercent != null || noData
-        if (hasCase) {
-            val slot = w / 3f
-            drawSlot(canvas, slot * 0.5f, slot, KIND_LEFT, leftPercent, leftCharging, "שמאל")
-            drawSlot(canvas, slot * 1.5f, slot, KIND_CASE, casePercent, caseCharging, "מארז")
-            drawSlot(canvas, slot * 2.5f, slot, KIND_RIGHT, rightPercent, rightCharging, "ימין")
-        } else {
-            val slot = w / 2f
-            drawSlot(canvas, slot * 0.5f, slot, KIND_LEFT, leftPercent, leftCharging, "שמאל")
-            drawSlot(canvas, slot * 1.5f, slot, KIND_RIGHT, rightPercent, rightCharging, "ימין")
+        if (items.isEmpty()) return
+ 
+        val span = w * 0.84f
+        val slot = span / max(items.size, 3)
+        val startX = (w - slot * items.size) / 2f
+        items.forEachIndexed { index, item ->
+            val cx = startX + slot * (index + 0.5f)
+            drawBatteryItem(canvas, cx, slot, h, item[0], item[1], item[2] == 1)
         }
     }
  
-    private fun drawSlot(
+    // A small icon, the percent text and a thin bar (red at 20% or less, green above).
+    private fun drawBatteryItem(
         canvas: Canvas,
         cx: Float,
-        slotWidth: Float,
+        slot: Float,
+        h: Float,
         kind: Int,
-        percent: Int?,
+        percent: Int,
         charging: Boolean,
-        label: String,
     ) {
-        val imageWidth = slotWidth - dp(12f)
-        val dst = RectF(cx - imageWidth / 2f, dp(6f), cx + imageWidth / 2f, height - dp(46f))
-        if (kind == KIND_CASE) {
-            val bitmap = caseBitmap
-            if (bitmap != null) drawFit(canvas, bitmap, dst) else drawCaseShape(canvas, dst)
-        } else {
-            canvas.save()
-            // Only a right earbud picture is needed: the left earbud is its mirror image.
-            if (kind == KIND_LEFT) canvas.scale(-1f, 1f, cx, 0f)
-            val bitmap = earbudBitmap
-            if (bitmap != null) drawFit(canvas, bitmap, dst) else drawEarbudShape(canvas, dst)
-            canvas.restore()
-        }
-        drawBattery(canvas, cx, slotWidth, percent, charging, label)
-    }
- 
-    private fun drawFit(canvas: Canvas, bitmap: Bitmap, dst: RectF) {
-        val scale = minOf(dst.width() / bitmap.width, dst.height() / bitmap.height)
-        val drawWidth = bitmap.width * scale
-        val drawHeight = bitmap.height * scale
-        rect.set(
-            dst.centerX() - drawWidth / 2f,
-            dst.centerY() - drawHeight / 2f,
-            dst.centerX() + drawWidth / 2f,
-            dst.centerY() + drawHeight / 2f,
-        )
-        canvas.drawBitmap(bitmap, null, rect, paint)
-    }
- 
-    private fun fillAndStroke(canvas: Canvas, draw: (Paint) -> Unit) {
-        paint.style = Paint.Style.FILL
-        paint.color = 0xFFFFFFFF.toInt()
-        draw(paint)
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = dp(1.5f)
-        paint.color = 0xFFB0B7BF.toInt()
-        draw(paint)
-        paint.style = Paint.Style.FILL
-    }
- 
-    // A simple earbud with a stem, facing right (used when there is no picture for the model).
-    private fun drawEarbudShape(canvas: Canvas, dst: RectF) {
-        val size = minOf(dst.width(), dst.height())
-        val radius = size * 0.28f
-        val bodyX = dst.centerX() - size * 0.05f
-        val bodyY = dst.top + size * 0.34f
-        val stemLeft = bodyX + radius * 0.35f
-        val stemRight = bodyX + radius * 0.95f
-        rect.set(stemLeft, bodyY, stemRight, bodyY + size * 0.62f)
-        val stemRadius = (stemRight - stemLeft) / 2f
-        fillAndStroke(canvas) { canvas.drawRoundRect(rect, stemRadius, stemRadius, it) }
-        fillAndStroke(canvas) { canvas.drawCircle(bodyX, bodyY, radius, it) }
-    }
- 
-    // A simple charging case (used when there is no picture for the model).
-    private fun drawCaseShape(canvas: Canvas, dst: RectF) {
-        val size = minOf(dst.width(), dst.height())
-        val caseWidth = size * 0.95f
-        val caseHeight = size * 0.72f
-        rect.set(
-            dst.centerX() - caseWidth / 2f,
-            dst.centerY() - caseHeight / 2f,
-            dst.centerX() + caseWidth / 2f,
-            dst.centerY() + caseHeight / 2f,
-        )
-        val corner = size * 0.18f
-        fillAndStroke(canvas) { canvas.drawRoundRect(rect, corner, corner, it) }
-        val lidY = rect.top + caseHeight * 0.38f
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = dp(1.5f)
-        paint.color = 0xFFB0B7BF.toInt()
-        canvas.drawLine(rect.left + corner * 0.3f, lidY, rect.right - corner * 0.3f, lidY, paint)
-        paint.style = Paint.Style.FILL
-        paint.color = 0xFF66BB6A.toInt()
-        canvas.drawCircle(dst.centerX(), lidY + caseHeight * 0.2f, dp(2.5f), paint)
-    }
- 
-    // Headphones (no separate earbuds): a headband and two ear cups.
-    private fun drawHeadphones(canvas: Canvas, cx: Float, slotWidth: Float) {
-        val size = minOf(slotWidth, height - dp(52f))
-        val top = dp(8f)
-        rect.set(cx - size * 0.38f, top, cx + size * 0.38f, top + size * 0.8f)
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = dp(5f)
-        paint.color = 0xFFB0B7BF.toInt()
-        canvas.drawArc(rect, 180f, 180f, false, paint)
-        paint.style = Paint.Style.FILL
-        val cupWidth = size * 0.2f
-        val cupHeight = size * 0.36f
-        val cupTop = top + size * 0.4f
-        paint.color = 0xFFFFFFFF.toInt()
-        rect.set(cx - size * 0.38f - cupWidth / 2f, cupTop, cx - size * 0.38f + cupWidth / 2f, cupTop + cupHeight)
-        canvas.drawRoundRect(rect, dp(6f), dp(6f), paint)
-        rect.set(cx + size * 0.38f - cupWidth / 2f, cupTop, cx + size * 0.38f + cupWidth / 2f, cupTop + cupHeight)
-        canvas.drawRoundRect(rect, dp(6f), dp(6f), paint)
-        drawBattery(canvas, cx, slotWidth, singlePercent, false, "אוזניות")
-    }
- 
-    // Percent text, a battery bar (red at 20% or less, green above) and the name underneath.
-    private fun drawBattery(
-        canvas: Canvas,
-        cx: Float,
-        slotWidth: Float,
-        percent: Int?,
-        charging: Boolean,
-        label: String,
-    ) {
-        textPaint.textSize = dp(10f)
-        canvas.drawText(label, cx, height - dp(4f), textPaint)
-        if (percent == null) return
- 
-        val barWidth = slotWidth * 0.6f
-        val barHeight = dp(6f)
-        val barTop = height - dp(20f)
         val level = percent.coerceIn(0, 100)
+        val text = "$level%"
+        valuePaint.textSize = dp(11f)
+        val textWidth = valuePaint.measureText(text)
+        val iconWidth = if (kind == KIND_SINGLE) 0f else dp(13f)
+        val gap = if (kind == KIND_SINGLE) 0f else dp(4f)
+        val boltWidth = if (charging) dp(8f) else 0f
+        val total = boltWidth + iconWidth + gap + textWidth
+        var x = cx - total / 2f
+        val baseline = h - dp(17f)
+        val centerY = baseline - dp(4f)
  
+        if (charging) {
+            drawBolt(canvas, x + dp(3f), centerY)
+            x += boltWidth
+        }
+        if (kind != KIND_SINGLE) drawBatteryIcon(canvas, kind, x + iconWidth / 2f, centerY)
+        canvas.drawText(text, x + iconWidth + gap, baseline, valuePaint)
+ 
+        val barWidth = slot * 0.72f
+        val barHeight = dp(3f)
+        val barTop = h - dp(10f)
         paint.style = Paint.Style.FILL
-        paint.color = 0xFFDADDE1.toInt()
+        paint.color = 0xFFDDE3EA.toInt()
         rect.set(cx - barWidth / 2f, barTop, cx + barWidth / 2f, barTop + barHeight)
         canvas.drawRoundRect(rect, barHeight / 2f, barHeight / 2f, paint)
         if (level > 0) {
-            paint.color = if (level <= 20) 0xFFE53935.toInt() else 0xFF43A047.toInt()
+            paint.color = if (level <= 20) 0xFFE0453A.toInt() else 0xFF2EAE4F.toInt()
             rect.set(cx - barWidth / 2f, barTop, cx - barWidth / 2f + barWidth * level / 100f, barTop + barHeight)
             canvas.drawRoundRect(rect, barHeight / 2f, barHeight / 2f, paint)
         }
+    }
  
-        textPaint.textSize = dp(12f)
-        val text = "$level%"
-        val baseline = barTop - dp(4f)
-        canvas.drawText(text, cx, baseline, textPaint)
-        if (charging) {
-            val boltX = cx - textPaint.measureText(text) / 2f - dp(7f)
-            drawBolt(canvas, boltX, baseline - dp(5f))
+    // L / R in a small circle, or a small case.
+    private fun drawBatteryIcon(canvas: Canvas, kind: Int, cx: Float, cy: Float) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = dp(1.2f)
+        paint.color = 0xFF6B7480.toInt()
+        if (kind == KIND_CASE) {
+            rect.set(cx - dp(6f), cy - dp(4.5f), cx + dp(6f), cy + dp(4.5f))
+            canvas.drawRoundRect(rect, dp(3f), dp(3f), paint)
+            canvas.drawLine(rect.left, cy - dp(1f), rect.right, cy - dp(1f), paint)
+        } else {
+            canvas.drawCircle(cx, cy, dp(6.2f), paint)
+            letterPaint.textSize = dp(7.5f)
+            canvas.drawText(if (kind == KIND_LEFT) "L" else "R", cx, cy + dp(2.6f), letterPaint)
         }
+        paint.style = Paint.Style.FILL
     }
  
     // A small lightning bolt, shown next to the percent while charging.
