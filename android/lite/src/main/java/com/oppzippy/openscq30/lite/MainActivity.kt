@@ -134,6 +134,7 @@ class MainActivity : Activity() {
     private var deviceTitle = ""
     private var moreCategory: String? = null
     private var ambientBar: AmbientBar? = null
+    private val ambientHandled = HashSet<String>()
     private val morePages = HashMap<String, LinearLayout>()
     private var moreMenuViews: List<View> = emptyList()
     private var moreMenuCard: LinearLayout? = null
@@ -567,6 +568,7 @@ class MainActivity : Activity() {
         showAllSwitch.isChecked = showAll
         showAllSwitch.setOnCheckedChangeListener { _, checked ->
             showAll = checked
+            prefs.edit().putBoolean("show_all", checked).apply()
             refreshDeviceList()
         }
         card.addView(showAllSwitch, matchWrap())
@@ -693,8 +695,33 @@ class MainActivity : Activity() {
         } else if (row.model != null) {
             startConnection(row.mac)
         } else {
-            showModelPicker(row)
+            // No model yet: if the Bluetooth name of the device clearly matches one model, use it without asking.
+            // A wrong guess can be changed with a long press on the device (the menu "שנה דגם").
+            val guess = guessModel(row.name)
+            if (guess != null) {
+                line("זוהה דגם אוטומטית: ${modelName(guess)}")
+                onModelChosen(row, guess)
+            } else {
+                showModelPicker(row)
+            }
         }
+    }
+ 
+    // The model whose name appears in the device name (the longest one, if it is the only one that long), or null.
+    private fun guessModel(deviceName: String): String? {
+        val name = deviceName.lowercase(Locale.US).trim()
+        if (name.isEmpty()) return null
+        val models: List<Pair<String, String>> = try {
+            deviceModels()
+                .filter { it != "SoundcoreDevelopment" }
+                .map { Pair(it, modelName(it).lowercase(Locale.US).trim()) }
+        } catch (t: Throwable) {
+            return null
+        }
+        val matches = models.filter { it.second.length >= 5 && (name == it.second || name.contains(it.second)) }
+        val best = matches.maxByOrNull { it.second.length } ?: return null
+        val sameLength = matches.count { it.second.length == best.second.length }
+        return if (sameLength == 1) best.first else null
     }
  
     // Pairs with a nearby device from inside the app (no need to open Android's Bluetooth settings).
@@ -903,6 +930,7 @@ class MainActivity : Activity() {
         lastRefreshError = ""
         reportedUntranslated = 0
         ambientBar = null
+        ambientHandled.clear()
         currentTab = TAB_SOUND
         moreMode = false
         deviceTitle = bondedRows.firstOrNull { it.mac.equals(mac, ignoreCase = true) }?.name ?: ""
@@ -1325,8 +1353,9 @@ class MainActivity : Activity() {
         }
     }
  
-    // The card of a settings category. Categories of the tabs get a small gray header; every other category becomes
-    // its own page behind a row in the "more settings" menu.
+    // The card of a settings category. Categories of the tabs get a small gray header (except the sound tab, which
+    // has none in the original app); every other category becomes its own page behind a row in the "more settings"
+    // menu.
     private fun sectionCard(category: String): LinearLayout {
         val existing = sections[category]
         if (existing != null) return existing
@@ -1342,7 +1371,9 @@ class MainActivity : Activity() {
             addMoreMenuRow(category)
         } else {
             val container = tabContainers[tab]
-            container.addView(UiStyle.sectionHeader(this, settingName(category)), matchWrap())
+            if (tab != TAB_SOUND) {
+                container.addView(UiStyle.sectionHeader(this, settingName(category)), matchWrap())
+            }
             container.addView(card, UiStyle.cardParams(this))
         }
         sections[category] = card
@@ -1371,7 +1402,7 @@ class MainActivity : Activity() {
         updateEarbuds(items)
         updateAmbientBar(device, items)
         for (item in items) {
-            if (ambientBar != null && keyNorm(item.key) in ambientKeys) continue
+            if (ambientBar != null && keyNorm(item.key) in ambientHandled) continue
             val setting = item.setting ?: continue
             // The battery levels are shown in the header.
             if (setting is Setting.InformationSetting && keyNorm(item.key).contains("battery")) continue
@@ -2116,21 +2147,25 @@ class MainActivity : Activity() {
         return Pair(root, updater)
     }
  
-    // ---------- ambient sound bar ----------
+    // ---------- ambient sound card ----------
  
-    private val ambientKeys = setOf("ambientsoundmode", "manualnoisecanceling", "manualnoisecancelling", "manualtransparency")
- 
-    // The original app's single bar for ambient sound, made from three settings: the mode and the two level settings.
-    // Left: transparency (the far left is the strongest). Middle: normal. Right: noise canceling (the far right,
-    // 10, is the strongest). Choosing a segment sends the mode and the level together.
+    // The first card of the sound tab, like the original app: two options with a round mark.
+    // "Ambient sound" shows one bar of 11 segments: transparency 1-5 on the left (1 is the strongest), a person icon
+    // for "normal" in the middle and noise canceling 6-10 on the right (10 is the strongest). Under the bar are
+    // "transparency" on the left, the current mode in the middle and "noise canceling" on the right.
+    // "Airplane mode" shows the current air pressure and, when chosen, how the pressure is updated.
+    // Choosing something sends the mode (and the level) to the earbuds together.
     private inner class AmbientBar(
         private val device: Any,
         private val modeKey: String,
         private val ancKey: String,
         private val transKey: String?,
+        private val airplaneKey: String?,
         mode: Setting.SelectSetting,
         anc: Setting.I32RangeSetting,
         trans: Setting.I32RangeSetting?,
+        airplane: Setting.SelectSetting?,
+        pressure: Setting.InformationSetting?,
     ) {
         private val modeOptions: List<String> = mode.setting.options
         private val ancStart = anc.setting.start
@@ -2141,35 +2176,120 @@ class MainActivity : Activity() {
         private val transCount = if (trans == null) 5 else (trans.setting.end - transStart) / transStep + 1
         private var lastTransLevel = transCount
         private var lastAncLevel = ancCount
+        private var lastAmbientOption: String? = null
+        private var airplaneSelected = false
  
+        // The empty label in the middle is drawn as a small person icon.
         private val bar = SegmentBar(
             this@MainActivity,
-            (1..transCount).map { it.toString() } + "רגיל" + (transCount + 1..transCount + ancCount).map { it.toString() },
+            (1..transCount).map { it.toString() } + "" + (transCount + 1..transCount + ancCount).map { it.toString() },
         )
+        private val ambientDot = RadioDot(this@MainActivity)
+        private val airplaneDot = RadioDot(this@MainActivity)
+        private val currentCaption = smallText("", 12f, UiStyle.textSecondary)
+        private val barBox = LinearLayout(this@MainActivity)
+        private val airplaneBox = LinearLayout(this@MainActivity)
+        private val airplaneSubtitle = smallText("", 12f, UiStyle.textSecondary)
+        private val airplanePills = ArrayList<Pair<String, Button>>()
+        private var pressureUpdater: ((Any?) -> Unit)? = null
         val view: LinearLayout = LinearLayout(this@MainActivity)
  
         init {
             view.orientation = LinearLayout.VERTICAL
-            view.addView(controlTitle("צליל סביבה"), matchWrap())
-            view.addView(bar, matchWrap())
+ 
+            // Ambient sound: the round mark, the bar and the captions under it.
+            view.addView(
+                radioRow(ambientDot, "סאונד סביבתי", null) {
+                    if (airplaneSelected) setMode(lastAmbientOption ?: optionFor("normal"))
+                },
+                matchWrap(),
+            )
+            barBox.orientation = LinearLayout.VERTICAL
+            barBox.addView(bar, matchWrap())
             val captions = LinearLayout(this@MainActivity)
             captions.orientation = LinearLayout.HORIZONTAL
             captions.layoutDirection = View.LAYOUT_DIRECTION_LTR
-            for ((text, gravity) in listOf("שקיפות" to Gravity.START, "ביטול רעש" to Gravity.END)) {
-                val caption = TextView(this@MainActivity)
-                caption.text = text
-                caption.textSize = 11f
-                caption.gravity = gravity
-                caption.setTextColor(UiStyle.textSecondary)
-                caption.setPadding(8, 0, 8, 4)
-                captions.addView(caption, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            }
-            view.addView(captions, matchWrap())
+            val leftCaption = smallText("שקיפות", 11f, UiStyle.textSecondary)
+            leftCaption.gravity = Gravity.START
+            currentCaption.gravity = Gravity.CENTER
+            val rightCaption = smallText("ביטול רעש", 11f, UiStyle.textSecondary)
+            rightCaption.gravity = Gravity.END
+            captions.addView(leftCaption, weightParams())
+            captions.addView(currentCaption, weightParams())
+            captions.addView(rightCaption, weightParams())
+            captions.setPadding(dpi(8f), 0, dpi(8f), dpi(4f))
+            barBox.addView(captions, matchWrap())
+            view.addView(barBox, matchWrap())
             bar.onCommit = { index -> send(index) }
+ 
+            view.addView(UiStyle.divider(this@MainActivity), UiStyle.dividerParams(this@MainActivity))
+ 
+            // Airplane mode: the round mark with the current pressure, and the update choice when chosen.
+            view.addView(
+                radioRow(airplaneDot, "מצב טיסה", airplaneSubtitle) {
+                    if (!airplaneSelected) setMode(optionFor("airplane"))
+                },
+                matchWrap(),
+            )
+            airplaneBox.orientation = LinearLayout.VERTICAL
+            if (airplane != null && airplaneKey != null) {
+                val pillRow = LinearLayout(this@MainActivity)
+                pillRow.orientation = LinearLayout.HORIZONTAL
+                val margin = dpi(3f)
+                val localized = airplane.setting.localizedOptions
+                airplane.setting.options.forEachIndexed { i, option ->
+                    val label = optionText(option, localized.getOrElse(i) { option })
+                    val pill = UiStyle.pill(this@MainActivity, label) {
+                        sendValue(device, airplaneKey, Value.StringValue(option), label)
+                    }
+                    val params = weightParams()
+                    params.setMargins(margin, margin, margin, margin)
+                    pillRow.addView(pill, params)
+                    airplanePills.add(Pair(option, pill))
+                }
+                airplaneBox.addView(pillRow, matchWrap())
+            }
+            if (pressure != null) {
+                val box = pressureControl(HebrewLabels.value(pressure.translatedValue)) {
+                    HebrewLabels.value((it as? Setting.InformationSetting)?.translatedValue ?: "")
+                }
+                pressureUpdater = box.second
+                val params = matchWrap()
+                params.setMargins(dpi(4f), dpi(6f), dpi(4f), dpi(4f))
+                airplaneBox.addView(box.first, params)
+            }
+            airplaneBox.visibility = View.GONE
+            view.addView(airplaneBox, matchWrap())
+        }
+ 
+        // A row with a round mark, a title and (optionally) a line of gray text under the title.
+        private fun radioRow(dot: RadioDot, title: String, subtitle: TextView?, onClick: () -> Unit): LinearLayout {
+            val row = LinearLayout(this@MainActivity)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            row.isFocusable = true
+            row.isClickable = true
+            row.background = UiStyle.focusable(this@MainActivity, UiStyle.card, 8f)
+            row.setPadding(dpi(8f), dpi(10f), dpi(8f), dpi(10f))
+            row.addView(dot)
+            val column = LinearLayout(this@MainActivity)
+            column.orientation = LinearLayout.VERTICAL
+            column.addView(smallText(title, 16f, UiStyle.textPrimary))
+            if (subtitle != null) column.addView(subtitle)
+            val params = weightParams()
+            params.marginStart = dpi(10f)
+            row.addView(column, params)
+            row.setOnClickListener { onClick() }
+            return row
         }
  
         private fun optionFor(fragment: String): String? =
             modeOptions.firstOrNull { it.lowercase(Locale.US).contains(fragment) }
+ 
+        private fun setMode(option: String?) {
+            if (option == null) return
+            sendValue(device, modeKey, Value.StringValue(option), "סאונד סביבתי")
+        }
  
         private fun send(index: Int) {
             val pairs = ArrayList<SettingIdValuePair>()
@@ -2196,15 +2316,48 @@ class MainActivity : Activity() {
             sendValues(device, pairs, description)
         }
  
-        // Moves the bar to the state reported by the device.
-        fun update(mode: Setting.SelectSetting?, anc: Setting.I32RangeSetting?, trans: Setting.I32RangeSetting?) {
+        // Moves everything to the state reported by the device.
+        fun update(
+            mode: Setting.SelectSetting?,
+            anc: Setting.I32RangeSetting?,
+            trans: Setting.I32RangeSetting?,
+            airplane: Setting.SelectSetting?,
+            pressure: Setting.InformationSetting?,
+        ) {
             if (anc != null) lastAncLevel = ((anc.value - ancStart) / ancStep + 1).coerceIn(1, ancCount)
             if (trans != null) lastTransLevel = ((trans.value - transStart) / transStep + 1).coerceIn(1, transCount)
-            val current = mode?.value?.lowercase(Locale.US) ?: return
-            when {
-                current.contains("transparen") -> bar.setLevelFromDevice(transCount - lastTransLevel)
-                current.contains("normal") -> bar.setLevelFromDevice(transCount)
-                current.contains("noise") -> bar.setLevelFromDevice(transCount + lastAncLevel)
+            val modeValue = mode?.value
+            if (modeValue != null) {
+                val current = modeValue.lowercase(Locale.US)
+                airplaneSelected = current.contains("airplane")
+                ambientDot.checked = !airplaneSelected
+                airplaneDot.checked = airplaneSelected
+                barBox.visibility = if (airplaneSelected) View.GONE else View.VISIBLE
+                airplaneBox.visibility = if (airplaneSelected) View.VISIBLE else View.GONE
+                airplaneSubtitle.visibility = if (airplaneSelected) View.GONE else View.VISIBLE
+                if (!airplaneSelected) lastAmbientOption = modeValue
+                when {
+                    current.contains("transparen") -> {
+                        bar.setLevelFromDevice(transCount - lastTransLevel)
+                        currentCaption.text = "שקיפות"
+                    }
+                    current.contains("normal") -> {
+                        bar.setLevelFromDevice(transCount)
+                        currentCaption.text = "רגיל"
+                    }
+                    current.contains("noise") -> {
+                        bar.setLevelFromDevice(transCount + lastAncLevel)
+                        currentCaption.text = "ביטול רעש"
+                    }
+                }
+            }
+            if (pressure != null) {
+                airplaneSubtitle.text = "לחץ אוויר נוכחי: " + HebrewLabels.value(pressure.translatedValue)
+                pressureUpdater?.invoke(pressure)
+            }
+            if (airplane != null) {
+                val chosen = airplane.value
+                airplanePills.forEach { UiStyle.setPillSelected(this@MainActivity, it.second, it.first == chosen) }
             }
         }
     }
@@ -2214,28 +2367,42 @@ class MainActivity : Activity() {
         val modeItem = find("ambientsoundmode")
         val ancItem = find("manualnoisecanceling", "manualnoisecancelling")
         val transItem = find("manualtransparency")
+        val airplaneItem = find("airplanemode")
+        val pressureItem = find("airpressure")
         val mode = modeItem?.setting as? Setting.SelectSetting
         val anc = ancItem?.setting as? Setting.I32RangeSetting
         val trans = transItem?.setting as? Setting.I32RangeSetting
+        val airplane = airplaneItem?.setting as? Setting.SelectSetting
+        val pressure = pressureItem?.setting as? Setting.InformationSetting
         if (ambientBar == null) {
             if (modeItem == null || ancItem == null || mode == null || anc == null) return
-            val created = AmbientBar(device, modeItem.key, ancItem.key, transItem?.key, mode, anc, trans)
+            val created = AmbientBar(
+                device, modeItem.key, ancItem.key, transItem?.key,
+                if (airplane != null) airplaneItem?.key else null,
+                mode, anc, trans, airplane, pressure,
+            )
             ambientBar = created
+            ambientHandled.add(keyNorm(modeItem.key))
+            ambientHandled.add(keyNorm(ancItem.key))
+            if (transItem != null) ambientHandled.add(keyNorm(transItem.key))
+            if (airplane != null && airplaneItem != null) ambientHandled.add(keyNorm(airplaneItem.key))
+            if (pressure != null && pressureItem != null) ambientHandled.add(keyNorm(pressureItem.key))
             val card = sectionCard(modeItem.category)
             if (card.childCount > 0) card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
             card.addView(created.view, matchWrap())
         }
-        ambientBar?.update(mode, anc, trans)
+        ambientBar?.update(mode, anc, trans, airplane, pressure)
     }
  
     // ---------- lifecycle ----------
  
-    private val APP_VERSION = "v12-סרטון"
+    private val APP_VERSION = "v14-צליל סביבה"
  
     override fun onCreate(savedInstanceState: Bundle?) {
         // A light theme without the system title bar (the app draws its own top bars).
         setTheme(android.R.style.Theme_Holo_Light_NoActionBar)
         super.onCreate(savedInstanceState)
+        showAll = prefs.getBoolean("show_all", false)
  
         val filter = IntentFilter()
         filter.addAction(BluetoothDevice.ACTION_FOUND)
