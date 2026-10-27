@@ -117,6 +117,8 @@ object HebrewLabels {
         "resetbuttonstodefault" to "איפוס בקרים לברירת מחדל",
         "controllock" to "נעילת בקרים",
         "controllocked" to "נעילת בקרים",
+        "touchlock" to "נעילת בקרים",
+        "touchlocked" to "נעילת בקרים",
         // buttons
         "leftsinglepress" to "אוזנייה שמאלית – לחיצה אחת",
         "leftdoublepress" to "אוזנייה שמאלית – לחיצה כפולה",
