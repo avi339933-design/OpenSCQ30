@@ -146,7 +146,10 @@ class MainActivity : Activity() {
     private var buttonsOtherCard: LinearLayout? = null
     private var sideLeftPill: Button? = null
     private var sideRightPill: Button? = null
+    private var buttonsLockCard: LinearLayout? = null
     private val slideTitled = HashSet<LinearLayout>()
+    private var resetKey: String? = null
+    private var resetDevice: Any? = null
  
     // One entry per setting id: a function that refreshes its control from a new value.
     private val controls = HashMap<String, (Any?) -> Unit>()
@@ -929,6 +932,8 @@ class MainActivity : Activity() {
         sections.clear()
         loggedSkips.clear()
         slideTitled.clear()
+        resetKey = null
+        resetDevice = null
         lastRefreshError = ""
         reportedUntranslated = 0
         ambientBar = null
@@ -938,7 +943,7 @@ class MainActivity : Activity() {
         deviceTitle = bondedRows.firstOrNull { it.mac.equals(mac, ignoreCase = true) }?.name ?: ""
  
         val title = TextView(this)
-        title.textSize = 17f
+        title.textSize = 18f
         title.setTypeface(null, Typeface.BOLD)
         title.setTextColor(UiStyle.textPrimary)
         title.gravity = Gravity.CENTER
@@ -1024,9 +1029,15 @@ class MainActivity : Activity() {
         buttonsLeftCard = leftCard
         buttonsRightCard = rightCard
         buttonsOtherCard = otherCard
+        leftCard.addView(controlsHeader(), matchWrap())
+        rightCard.addView(controlsHeader(), matchWrap())
+        val lockCard = UiStyle.card(this)
+        lockCard.visibility = View.GONE
+        buttonsLockCard = lockCard
         buttonsTab.addView(leftCard, UiStyle.cardParams(this))
         buttonsTab.addView(rightCard, UiStyle.cardParams(this))
         buttonsTab.addView(otherCard, UiStyle.cardParams(this))
+        buttonsTab.addView(lockCard, UiStyle.cardParams(this))
         showSide(0)
  
         // More settings: a menu with one row per category, then a "reconnect" button.
@@ -1068,6 +1079,42 @@ class MainActivity : Activity() {
         selectTab(TAB_SOUND)
         renderStatus()
         tabHeaders.getOrNull(TAB_SOUND)?.requestFocus()
+    }
+ 
+    // The title of the buttons cards, like the original: "שמע" with a reset icon at the end.
+    private fun controlsHeader(): LinearLayout {
+        val header = LinearLayout(this)
+        header.orientation = LinearLayout.HORIZONTAL
+        header.gravity = Gravity.CENTER_VERTICAL
+        header.setPadding(dpi(8f), dpi(8f), dpi(8f), dpi(4f))
+        header.addView(smallText("שמע", 16f, UiStyle.textPrimary, true), weightParams())
+        val reset = LinearLayout(this)
+        reset.gravity = Gravity.CENTER
+        reset.isFocusable = true
+        reset.isClickable = true
+        reset.background = UiStyle.focusable(this, UiStyle.card, 14f)
+        reset.setPadding(dpi(4f), dpi(4f), dpi(4f), dpi(4f))
+        reset.addView(OfficialIconView(this, OfficialIcon.RESET, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(20f), dpi(20f)))
+        reset.setOnClickListener { confirmReset() }
+        header.addView(reset, LinearLayout.LayoutParams(dpi(28f), dpi(28f)))
+        return header
+    }
+ 
+    // The reset icon runs the "reset buttons to default" action of the core, after a confirmation.
+    private fun confirmReset() {
+        val key = resetKey
+        val device = resetDevice
+        if (key == null || device == null) {
+            toast("האיפוס לא זמין")
+            return
+        }
+        val name = settingName(key)
+        AlertDialog.Builder(this)
+            .setTitle(name)
+            .setMessage("לבצע את הפעולה?")
+            .setPositiveButton("כן") { _, _ -> sendValue(device, key, Value.BoolValue(true), name) }
+            .setNegativeButton("לא", null)
+            .show()
     }
  
     private fun showSide(side: Int) {
@@ -1385,6 +1432,14 @@ class MainActivity : Activity() {
  
     // The card a control goes into. Button settings go to the card of their side (left / right) in the buttons tab.
     private fun cardFor(item: SettingItem): LinearLayout {
+        val lockKey = keyNorm(item.key)
+        if (lockKey.contains("touchlock") || lockKey.contains("controllock")) {
+            val lock = buttonsLockCard
+            if (lock != null) {
+                lock.visibility = View.VISIBLE
+                return lock
+            }
+        }
         if (tabFor(item.category) == TAB_CONTROLS) {
             val k = keyNorm(item.key)
             val target = when {
@@ -1407,6 +1462,12 @@ class MainActivity : Activity() {
         for (item in items) {
             if (ambientBar != null && keyNorm(item.key) in ambientHandled) continue
             val setting = item.setting ?: continue
+            // The reset action is the icon in the title of the buttons cards.
+            if (setting is Setting.Action && keyNorm(item.key).contains("resetbuttons")) {
+                resetKey = item.key
+                resetDevice = device
+                continue
+            }
             // The battery levels are shown in the header.
             if (setting is Setting.InformationSetting && keyNorm(item.key).contains("battery")) continue
             var updater = controls[item.key]
@@ -1420,7 +1481,7 @@ class MainActivity : Activity() {
                 val card = cardFor(item)
                 if (card.childCount > 0) card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
                 if (tab == TAB_CONTROLS && keyNorm(item.key).contains("slide") && slideTitled.add(card)) {
-                    card.addView(UiStyle.sectionHeader(this, "לא ניתן לשינוי"), matchWrap())
+                    card.addView(UiStyle.sectionHeader(this, "לא ניתן לכוונון"), matchWrap())
                 }
                 card.addView(built.first, matchWrap())
                 controls[item.key] = built.second
@@ -2462,7 +2523,7 @@ class MainActivity : Activity() {
  
     // ---------- lifecycle ----------
  
-    private val APP_VERSION = "v16-ממשק רשמי"
+    private val APP_VERSION = "v17-ממשק רשמי"
  
     override fun onCreate(savedInstanceState: Bundle?) {
         // A light theme without the system title bar (the app draws its own top bars).
@@ -2564,4 +2625,3 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 }
- 
