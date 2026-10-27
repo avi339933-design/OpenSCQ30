@@ -69,6 +69,7 @@ class MainActivity : Activity() {
         private const val TAB_EQ = 1
         private const val TAB_CONTROLS = 2
         private const val TAB_MORE = 3
+        private const val PRESSURE_TIP = "Atm (אטמוספירה)\nלחץ האוויר האטמוספרי הסטנדרטי הוא 1.00. שינויים בלחץ האוויר עלולים להשפיע על ביצועי ביטול הרעשים. אופטימיזציה ללחץ אטמוספרי תשפר את חוויית ביטול הרעשים שלכם."
     }
  
     private enum class Screen { LIST, PICKER, CONNECTED }
@@ -515,7 +516,7 @@ class MainActivity : Activity() {
         add.background = UiStyle.focusable(this, UiStyle.card, 14f)
         add.setPadding(dpi(12f), dpi(14f), dpi(12f), dpi(14f))
         add.addView(IconView(this, IconKind.PLUS, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
-        val addText = smallText("הוסף מכשיר", 14f, UiStyle.textSecondary)
+        val addText = smallText("הוספת מכשיר", 14f, UiStyle.textSecondary)
         addText.setPadding(dpi(6f), 0, 0, 0)
         add.addView(addText)
         add.setOnClickListener { startScan() }
@@ -647,6 +648,7 @@ class MainActivity : Activity() {
             }
             container.addView(card, UiStyle.cardParams(this))
         }
+        if (currentFocus == null) container.getChildAt(0)?.requestFocus()
     }
  
     // All paired (bonded) Bluetooth devices, each with its assigned model (or null).
@@ -680,7 +682,7 @@ class MainActivity : Activity() {
                 bondedRows = allRows()
                 rebuildRows()
                 if (deviceRows.isEmpty()) {
-                    line("לא נמצאו מכשירי Anker (${bondedRows.size} מכשירים מזווגים בסך הכל). לחץ על 'הוסף מכשיר', או הפעל 'הצג את כל המכשירים'.")
+                    line("לא נמצאו מכשירי Anker (${bondedRows.size} מכשירים מזווגים בסך הכל). לחץ על 'הוספת מכשיר', או הפעל 'הצג את כל המכשירים'.")
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
@@ -972,7 +974,7 @@ class MainActivity : Activity() {
         strip.setBackgroundColor(UiStyle.card)
         tabStrip = strip
         val headers = ArrayList<LinearLayout>()
-        listOf(IconKind.SOUND, IconKind.EQUALIZER, IconKind.TOUCH).forEachIndexed { index, kind ->
+        listOf(OfficialIcon.TAB_AMBIENT, OfficialIcon.TAB_EQ, OfficialIcon.TAB_CONTROLS).forEachIndexed { index, kind ->
             val header = LinearLayout(this)
             header.orientation = LinearLayout.VERTICAL
             header.gravity = Gravity.CENTER_HORIZONTAL
@@ -980,9 +982,9 @@ class MainActivity : Activity() {
             header.isClickable = true
             header.background = UiStyle.focusable(this, UiStyle.card, 0f)
             header.setPadding(0, dpi(8f), 0, 0)
-            header.addView(IconView(this, kind, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(26f), dpi(26f)))
-            val underline = LinearLayout.LayoutParams(dpi(26f), dpi(3f))
-            underline.topMargin = dpi(6f)
+            header.addView(OfficialIconView(this, kind, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(28f), dpi(28f)))
+            val underline = LinearLayout.LayoutParams(dpi(8f), dpi(2f))
+            underline.topMargin = dpi(8f)
             header.addView(View(this), underline)
             header.setOnClickListener { selectTab(index) }
             strip.addView(header, weightParams())
@@ -1065,6 +1067,7 @@ class MainActivity : Activity() {
  
         selectTab(TAB_SOUND)
         renderStatus()
+        tabHeaders.getOrNull(TAB_SOUND)?.requestFocus()
     }
  
     private fun showSide(side: Int) {
@@ -1075,7 +1078,7 @@ class MainActivity : Activity() {
     }
  
     private fun styleTabHeader(header: LinearLayout, selected: Boolean) {
-        val icon = header.getChildAt(0) as IconView
+        val icon = header.getChildAt(0) as OfficialIconView
         val underline = header.getChildAt(1)
         icon.setTint(if (selected) UiStyle.blue else UiStyle.textSecondary)
         underline.setBackgroundColor(if (selected) UiStyle.blue else 0)
@@ -1546,28 +1549,71 @@ class MainActivity : Activity() {
         box.orientation = LinearLayout.HORIZONTAL
         box.gravity = Gravity.CENTER_VERTICAL
         box.background = UiStyle.rounded(UiStyle.blueLight, dpi(12f).toFloat())
-        box.setPadding(dpi(10f), dpi(10f), dpi(10f), dpi(10f))
+        box.setPadding(dpi(12f), dpi(16f), dpi(12f), dpi(16f))
  
+        // The original: a round light-blue mark with the barometer icon in the brand color.
         val iconHolder = LinearLayout(this)
         iconHolder.gravity = Gravity.CENTER
-        iconHolder.background = UiStyle.rounded(0xFFCDEEFA.toInt(), dpi(22f).toFloat())
-        iconHolder.addView(IconView(this, IconKind.GAUGE, UiStyle.blue), LinearLayout.LayoutParams(dpi(26f), dpi(26f)))
-        val iconParams = LinearLayout.LayoutParams(dpi(44f), dpi(44f))
-        iconParams.marginEnd = dpi(10f)
+        iconHolder.background = UiStyle.rounded(0x1900CBEB, dpi(24f).toFloat())
+        iconHolder.addView(
+            OfficialIconView(this, OfficialIcon.BAROMETRIC, 0xFF00CBEB.toInt()),
+            LinearLayout.LayoutParams(dpi(28f), dpi(28f)),
+        )
+        val iconParams = LinearLayout.LayoutParams(dpi(48f), dpi(48f))
+        iconParams.marginEnd = dpi(8f)
         box.addView(iconHolder, iconParams)
  
         val texts = LinearLayout(this)
         texts.orientation = LinearLayout.VERTICAL
-        val value = smallText(initial, 15f, UiStyle.textPrimary, true)
-        texts.addView(value, matchWrap())
-        texts.addView(smallText("לחץ אוויר נוכחי", 11f, UiStyle.textSecondary), matchWrap())
+        val valueRow = LinearLayout(this)
+        valueRow.orientation = LinearLayout.HORIZONTAL
+        valueRow.gravity = Gravity.CENTER_VERTICAL
+        val value = smallText(initial, 14f, UiStyle.textPrimary)
+        valueRow.addView(value)
+        valueRow.addView(tipIcon("לחץ האוויר הנוכחי", PRESSURE_TIP), LinearLayout.LayoutParams(dpi(28f), dpi(28f)))
+        texts.addView(valueRow, matchWrap())
+        texts.addView(smallText("לחץ האוויר הנוכחי", 12f, UiStyle.textSecondary), matchWrap())
         box.addView(texts, weightParams())
         return Pair(box, { s -> value.text = textOf(s) })
     }
  
+    // A small "i" icon that opens the explanation of a setting (like the tips of the original app).
+    private fun tipIcon(title: String, message: String): View {
+        val holder = LinearLayout(this)
+        holder.gravity = Gravity.CENTER
+        holder.isFocusable = true
+        holder.isClickable = true
+        holder.background = UiStyle.focusable(this, UiStyle.card, 14f)
+        holder.setPadding(dpi(6f), dpi(6f), dpi(6f), dpi(6f))
+        holder.addView(
+            OfficialIconView(this, OfficialIcon.TIPS, UiStyle.textSecondary),
+            LinearLayout.LayoutParams(dpi(16f), dpi(16f)),
+        )
+        holder.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("אישור", null)
+                .show()
+        }
+        return holder
+    }
+ 
+    // The original explanation of a setting, for the settings that have one.
+    private fun tipFor(key: String): String? {
+        val k = keyNorm(key)
+        return when {
+            k.contains("windnoise") -> "הפעלת פונקציה זו יכולה להפחית או למנוע הפרעות רעש הנגרמות מרוח."
+            k.contains("easychat") && !k.contains("wait") ->
+                "הפעילו שיחה קלה כדי להנמיך את עוצמת המוזיקה מהמכשיר ולהבהיר את הקולות לשיחות קצרות."
+            else -> null
+        }
+    }
+ 
     private fun toggleControl(device: Any, key: String, setting: Setting.ToggleSetting): Pair<View, (Any?) -> Unit> {
+        val tip = tipFor(key)
         val box = Switch(this)
-        box.text = settingName(key)
+        if (tip == null) box.text = settingName(key)
         box.textSize = 13f
         box.setTextColor(UiStyle.textPrimary)
         box.textOn = ""
@@ -1587,7 +1633,16 @@ class MainActivity : Activity() {
         val updater: (Any?) -> Unit = { s ->
             if (s is Setting.ToggleSetting) box.isChecked = s.value
         }
-        return Pair(box, updater)
+        if (tip == null) return Pair(box, updater)
+        // With a tip: the name, the "i" icon and the switch in one row, like the original.
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(dpi(8f), 0, dpi(8f), 0)
+        row.addView(smallText(settingName(key), 13f, UiStyle.textPrimary), weightParams())
+        row.addView(tipIcon(settingName(key), tip), LinearLayout.LayoutParams(dpi(28f), dpi(28f)))
+        row.addView(box, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        return Pair(row, updater)
     }
  
     // A button that runs a one-time action (for example resetting the earbud buttons), after a confirmation.
@@ -1839,6 +1894,7 @@ class MainActivity : Activity() {
  
         val list = LinearLayout(this)
         list.orientation = LinearLayout.VERTICAL
+        var focusRow: View? = null
         labels.forEachIndexed { i, label ->
             val row = LinearLayout(this)
             row.orientation = LinearLayout.HORIZONTAL
@@ -1856,6 +1912,7 @@ class MainActivity : Activity() {
                 onPick(i)
             }
             list.addView(row, matchWrap())
+            if (i == checked || (focusRow == null && i == 0)) focusRow = row
         }
         val scroll = ScrollView(this)
         scroll.addView(list)
@@ -1869,6 +1926,7 @@ class MainActivity : Activity() {
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         dialog.show()
+        focusRow?.requestFocus()
     }
  
     private fun pressIcon(key: String): IconKind {
@@ -2199,25 +2257,33 @@ class MainActivity : Activity() {
  
             // Ambient sound: the round mark, the bar and the captions under it.
             view.addView(
-                radioRow(ambientDot, "סאונד סביבתי", null) {
+                radioRow(ambientDot, "צליל סביבה", null) {
                     if (airplaneSelected) setMode(lastAmbientOption ?: optionFor("normal"))
                 },
                 matchWrap(),
             )
             barBox.orientation = LinearLayout.VERTICAL
-            barBox.addView(bar, matchWrap())
+            val barParams = matchWrap()
+            barParams.setMargins(dpi(12f), dpi(16f), dpi(12f), 0)
+            barBox.addView(bar, barParams)
+            // Under the bar, like the original: the transparency icon on the left, the current mode in the
+            // middle and the noise canceling icon on the right.
             val captions = LinearLayout(this@MainActivity)
             captions.orientation = LinearLayout.HORIZONTAL
             captions.layoutDirection = View.LAYOUT_DIRECTION_LTR
-            val leftCaption = smallText("שקיפות", 11f, UiStyle.textSecondary)
-            leftCaption.gravity = Gravity.START
+            captions.gravity = Gravity.CENTER_VERTICAL
             currentCaption.gravity = Gravity.CENTER
-            val rightCaption = smallText("ביטול רעש", 11f, UiStyle.textSecondary)
-            rightCaption.gravity = Gravity.END
-            captions.addView(leftCaption, weightParams())
+            currentCaption.textSize = 14f
+            captions.addView(
+                OfficialIconView(this@MainActivity, OfficialIcon.AMBIENT_TRANSPARENCY, UiStyle.textSecondary),
+                LinearLayout.LayoutParams(dpi(20f), dpi(20f)),
+            )
             captions.addView(currentCaption, weightParams())
-            captions.addView(rightCaption, weightParams())
-            captions.setPadding(dpi(8f), 0, dpi(8f), dpi(4f))
+            captions.addView(
+                OfficialIconView(this@MainActivity, OfficialIcon.AMBIENT_ANC, UiStyle.textSecondary),
+                LinearLayout.LayoutParams(dpi(20f), dpi(20f)),
+            )
+            captions.setPadding(dpi(12f), dpi(8f), dpi(12f), dpi(20f))
             barBox.addView(captions, matchWrap())
             view.addView(barBox, matchWrap())
             bar.onCommit = { index -> send(index) }
@@ -2288,7 +2354,7 @@ class MainActivity : Activity() {
  
         private fun setMode(option: String?) {
             if (option == null) return
-            sendValue(device, modeKey, Value.StringValue(option), "סאונד סביבתי")
+            sendValue(device, modeKey, Value.StringValue(option), "צליל סביבה")
         }
  
         private fun send(index: Int) {
@@ -2311,7 +2377,7 @@ class MainActivity : Activity() {
                 val level = index - transCount
                 pairs.add(SettingIdValuePair(modeKey, Value.StringValue(option)))
                 pairs.add(SettingIdValuePair(ancKey, Value.I32Value(ancStart + (level - 1) * ancStep)))
-                description = "ביטול רעש, רמה $level"
+                description = "ביטול רעשים, רמה $level"
             }
             sendValues(device, pairs, description)
         }
@@ -2347,12 +2413,12 @@ class MainActivity : Activity() {
                     }
                     current.contains("noise") -> {
                         bar.setLevelFromDevice(transCount + lastAncLevel)
-                        currentCaption.text = "ביטול רעש"
+                        currentCaption.text = "ביטול רעשים"
                     }
                 }
             }
             if (pressure != null) {
-                airplaneSubtitle.text = "לחץ אוויר נוכחי: " + HebrewLabels.value(pressure.translatedValue)
+                airplaneSubtitle.text = "לחץ האוויר הנוכחי: " + HebrewLabels.value(pressure.translatedValue)
                 pressureUpdater?.invoke(pressure)
             }
             if (airplane != null) {
@@ -2396,7 +2462,7 @@ class MainActivity : Activity() {
  
     // ---------- lifecycle ----------
  
-    private val APP_VERSION = "v14-צליל סביבה"
+    private val APP_VERSION = "v16-ממשק רשמי"
  
     override fun onCreate(savedInstanceState: Bundle?) {
         // A light theme without the system title bar (the app draws its own top bars).
