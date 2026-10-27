@@ -14,23 +14,39 @@ import kotlin.math.max
 import kotlin.math.min
  
 /**
- * Pictures of the devices. The picture of a model is looked up in this order:
- *   1. assets/devices/<model id in lower case>_hero.png   (add this file to show another model)
- *   2. the built-in Liberty 4 Pro picture (EarbudsImage.kt) for model ids that contain "a3954"
- *   3. nothing: a simple drawing is shown instead.
+ * Pictures of the devices. The pictures of a model are looked up in assets/devices/, where the file name starts
+ * with the model id in lower case (for example "soundcorea3954"):
+ *   <model>_hero.png    the whole product (used on the "my devices" cards, and for headphones)
+ *   <model>_left.png    the left earbud alone   (shown above the left battery)
+ *   <model>_right.png   the right earbud alone  (shown above the right battery)
+ *   <model>_case.png    the charging case       (shown above the case battery)
+ * If there is no hero file, the built-in Liberty 4 Pro picture (EarbudsImage.kt) is used for model ids that contain
+ * "a3954". Pictures that do not exist are replaced by a simple drawing.
  */
 object DevicePictures {
     private val cache = HashMap<String, Bitmap?>()
  
+    private fun loadAsset(context: Context, name: String): Bitmap? = try {
+        context.assets.open("devices/$name").use { BitmapFactory.decodeStream(it) }
+    } catch (_: Throwable) {
+        null
+    }
+ 
     fun hero(context: Context, modelId: String): Bitmap? {
         val key = modelId.lowercase(Locale.US)
         if (cache.containsKey(key)) return cache[key]
-        var bitmap: Bitmap? = try {
-            context.assets.open("devices/${key}_hero.png").use { BitmapFactory.decodeStream(it) }
-        } catch (_: Throwable) {
-            null
-        }
+        var bitmap: Bitmap? = loadAsset(context, "${key}_hero.png")
         if (bitmap == null && key.contains("a3954")) bitmap = EarbudsImage.bitmap()
+        cache[key] = bitmap
+        return bitmap
+    }
+ 
+    // kind is "left", "right" or "case".
+    fun part(context: Context, modelId: String, kind: String): Bitmap? {
+        val model = modelId.lowercase(Locale.US)
+        val key = "$model/$kind"
+        if (cache.containsKey(key)) return cache[key]
+        val bitmap = loadAsset(context, "${model}_$kind.png")
         cache[key] = bitmap
         return bitmap
     }
@@ -54,6 +70,21 @@ class PictureDrawer(private val density: Float) {
             drawCaseShape(canvas, caseDst)
             drawEarbudShape(canvas, budDst)
         }
+    }
+ 
+    // One picture, scaled to fit inside the rectangle.
+    fun drawBitmap(canvas: Canvas, bitmap: Bitmap, dst: RectF) {
+        drawFit(canvas, bitmap, dst)
+    }
+ 
+    // One simple earbud (used when a model has no earbud picture).
+    fun drawEarbud(canvas: Canvas, dst: RectF) {
+        drawEarbudShape(canvas, dst)
+    }
+ 
+    // One simple charging case (used when a model has no case picture).
+    fun drawCase(canvas: Canvas, dst: RectF) {
+        drawCaseShape(canvas, dst)
     }
  
     private fun drawFit(canvas: Canvas, bitmap: Bitmap, dst: RectF) {
@@ -162,9 +193,11 @@ class DevicePictureView(context: Context) : View(context) {
 }
  
 /**
- * The top of the device screen, like the original app: a picture of the device on a pale blue shape, and a row of
- * thin battery bars underneath (left earbud, right earbud, case) with a small icon and the percent.
- * The order of the batteries is always left to right on the screen.
+ * The top of the device screen, like the original app: a row of thin battery bars (left earbud, right earbud,
+ * case) with a small icon and the percent, and above each battery the picture of that part: the left earbud above
+ * the left battery, the right earbud above the right battery and the case above the case battery.
+ * The order is always left to right on the screen.
+ * Models that have no separate earbud pictures show one picture of the whole device on a pale shape instead.
  */
 class EarbudsView(context: Context) : View(context) {
     companion object {
@@ -184,6 +217,9 @@ class EarbudsView(context: Context) : View(context) {
  
     private var modelId = ""
     private var hero: Bitmap? = null
+    private var leftPart: Bitmap? = null
+    private var rightPart: Bitmap? = null
+    private var casePart: Bitmap? = null
  
     private var leftPercent: Int? = null
     private var rightPercent: Int? = null
@@ -207,6 +243,9 @@ class EarbudsView(context: Context) : View(context) {
         if (id == modelId) return
         modelId = id
         hero = if (id.isEmpty()) null else DevicePictures.hero(context, id)
+        leftPart = if (id.isEmpty()) null else DevicePictures.part(context, id, "left")
+        rightPart = if (id.isEmpty()) null else DevicePictures.part(context, id, "right")
+        casePart = if (id.isEmpty()) null else DevicePictures.part(context, id, "case")
         invalidate()
     }
  
@@ -239,16 +278,6 @@ class EarbudsView(context: Context) : View(context) {
  
         val pictureBottom = h - dp(38f)
  
-        // The pale shape behind the picture (on the right, like the original app).
-        paint.style = Paint.Style.FILL
-        paint.color = 0xFFE6F6FD.toInt()
-        canvas.drawCircle(w * 0.74f, pictureBottom * 0.5f + dp(6f), pictureBottom * 0.5f, paint)
- 
-        val headphonesOnly = leftPercent == null && rightPercent == null && casePercent == null &&
-            singlePercent != null
-        val dst = RectF(w * 0.14f, dp(6f), w * 0.68f, pictureBottom)
-        drawer.draw(canvas, hero, dst, headphonesOnly)
- 
         // The battery items, from left to right.
         val items = ArrayList<IntArray>() // kind, percent, charging (0/1)
         leftPercent?.let { items.add(intArrayOf(KIND_LEFT, it, if (leftCharging) 1 else 0)) }
@@ -257,14 +286,56 @@ class EarbudsView(context: Context) : View(context) {
         if (items.isEmpty()) {
             singlePercent?.let { items.add(intArrayOf(KIND_SINGLE, it, 0)) }
         }
-        if (items.isEmpty()) return
  
         val span = w * 0.84f
         val slot = span / max(items.size, 3)
         val startX = (w - slot * items.size) / 2f
+ 
+        val separateParts = items.isNotEmpty() && (leftPart != null || rightPart != null)
+        if (separateParts) {
+            // Each part above its own battery.
+            items.forEachIndexed { index, item ->
+                val cx = startX + slot * (index + 0.5f)
+                drawPart(canvas, cx, slot, pictureBottom, item[0])
+            }
+        } else {
+            // One picture of the whole device on a pale shape (on the right, like the original app).
+            paint.style = Paint.Style.FILL
+            paint.color = 0xFFE6F6FD.toInt()
+            canvas.drawCircle(w * 0.74f, pictureBottom * 0.5f + dp(6f), pictureBottom * 0.5f, paint)
+ 
+            val headphonesOnly = leftPercent == null && rightPercent == null && casePercent == null &&
+                singlePercent != null
+            val dst = RectF(w * 0.14f, dp(6f), w * 0.68f, pictureBottom)
+            drawer.draw(canvas, hero, dst, headphonesOnly)
+        }
+ 
+        if (items.isEmpty()) return
         items.forEachIndexed { index, item ->
             val cx = startX + slot * (index + 0.5f)
             drawBatteryItem(canvas, cx, slot, h, item[0], item[1], item[2] == 1)
+        }
+    }
+ 
+    // The picture of one part (left earbud, right earbud or case) on a small pale circle, above its battery.
+    private fun drawPart(canvas: Canvas, cx: Float, slot: Float, bottom: Float, kind: Int) {
+        val top = dp(6f)
+        val height = bottom - top
+        val radius = min(slot, height) * 0.48f
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFFE6F6FD.toInt()
+        canvas.drawCircle(cx, top + height / 2f, radius, paint)
+ 
+        val inset = slot * 0.08f
+        val dst = RectF(cx - slot / 2f + inset, top + height * 0.08f, cx + slot / 2f - inset, bottom - height * 0.08f)
+        val left = leftPart
+        val right = rightPart
+        val case = casePart
+        when (kind) {
+            KIND_LEFT -> if (left != null) drawer.drawBitmap(canvas, left, dst) else drawer.drawEarbud(canvas, dst)
+            KIND_RIGHT -> if (right != null) drawer.drawBitmap(canvas, right, dst) else drawer.drawEarbud(canvas, dst)
+            KIND_CASE -> if (case != null) drawer.drawBitmap(canvas, case, dst) else drawer.drawCase(canvas, dst)
+            else -> drawer.draw(canvas, hero, dst, true)
         }
     }
  
