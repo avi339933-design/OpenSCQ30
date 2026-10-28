@@ -1127,8 +1127,12 @@ class MainActivity : Activity() {
     private fun styleTabHeader(header: LinearLayout, selected: Boolean) {
         val icon = header.getChildAt(0) as OfficialIconView
         val underline = header.getChildAt(1)
-        icon.setTint(if (selected) UiStyle.blue else UiStyle.textSecondary)
-        underline.setBackgroundColor(if (selected) UiStyle.blue else 0)
+        icon.setTint(if (selected) 0xFF333333.toInt() else 0xFF999999.toInt())
+        if (selected) {
+            underline.background = UiStyle.rounded(0xFF00CBEB.toInt(), dpi(2f).toFloat())
+        } else {
+            underline.setBackgroundColor(0)
+        }
     }
  
     private fun selectTab(index: Int) {
@@ -1579,7 +1583,7 @@ class MainActivity : Activity() {
     private fun controlTitle(name: String): TextView {
         val view = TextView(this)
         view.text = name
-        view.textSize = 14f
+        view.textSize = 16f
         view.setTextColor(UiStyle.textPrimary)
         view.setPadding(8, 8, 8, 4)
         return view
@@ -1594,11 +1598,11 @@ class MainActivity : Activity() {
         row.setPadding(8, 12, 8, 12)
         val name = TextView(this)
         name.text = settingName(key)
-        name.textSize = 13f
+        name.textSize = 16f
         name.setTextColor(UiStyle.textPrimary)
         val value = TextView(this)
         value.text = initial
-        value.textSize = 13f
+        value.textSize = 14f
         value.setTextColor(UiStyle.textSecondary)
         row.addView(name, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -1675,7 +1679,7 @@ class MainActivity : Activity() {
         val tip = tipFor(key)
         val box = Switch(this)
         if (tip == null) box.text = settingName(key)
-        box.textSize = 13f
+        box.textSize = 16f
         box.setTextColor(UiStyle.textPrimary)
         box.textOn = ""
         box.textOff = ""
@@ -1700,7 +1704,7 @@ class MainActivity : Activity() {
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
         row.setPadding(dpi(8f), 0, dpi(8f), 0)
-        row.addView(smallText(settingName(key), 13f, UiStyle.textPrimary), weightParams())
+        row.addView(smallText(settingName(key), 16f, UiStyle.textPrimary), weightParams())
         row.addView(tipIcon(settingName(key), tip), LinearLayout.LayoutParams(dpi(28f), dpi(28f)))
         row.addView(box, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         return Pair(row, updater)
@@ -1848,7 +1852,7 @@ class MainActivity : Activity() {
         }
  
         val label = TextView(this)
-        label.textSize = 13f
+        label.textSize = 14f
         label.setTextColor(UiStyle.textSecondary)
         label.setPadding(8, 0, 8, 0)
         val bar = SeekBar(this)
@@ -1964,7 +1968,7 @@ class MainActivity : Activity() {
             row.isClickable = true
             row.background = UiStyle.focusable(this, UiStyle.card, 8f)
             row.setPadding(dpi(8f), dpi(10f), dpi(8f), dpi(10f))
-            row.addView(smallText(label, 14f, UiStyle.textPrimary, i == checked), weightParams())
+            row.addView(smallText(label, 16f, UiStyle.textPrimary, i == checked), weightParams())
             val dot = RadioDot(this)
             dot.checked = i == checked
             row.addView(dot)
@@ -2030,8 +2034,8 @@ class MainActivity : Activity() {
  
         val column = LinearLayout(this)
         column.orientation = LinearLayout.VERTICAL
-        column.addView(smallText(title, 14f, UiStyle.textPrimary))
-        val subtitle = smallText("", 12f, UiStyle.textSecondary)
+        column.addView(smallText(title, 16f, UiStyle.textPrimary))
+        val subtitle = smallText("", 14f, UiStyle.textSecondary)
         column.addView(subtitle)
         row.addView(column, weightParams())
         row.addView(IconView(this, IconKind.CHEVRON, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
@@ -2057,7 +2061,7 @@ class MainActivity : Activity() {
         val radius = dpi(12f).toFloat()
         val stroke = dpi(2f)
         if (!selected) return UiStyle.focusable(this, UiStyle.card, 12f)
-        val colors = intArrayOf(0xFF55D2FF.toInt(), 0xFF2B9FF4.toInt())
+        val colors = intArrayOf(0xFF53D6FF.toInt(), 0xFF329DFF.toInt())
         val focused = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors)
         focused.cornerRadius = radius
         focused.setStroke(stroke, UiStyle.blueDark)
@@ -2114,7 +2118,7 @@ class MainActivity : Activity() {
             val iconParams = LinearLayout.LayoutParams(dpi(24f), dpi(24f))
             iconParams.marginEnd = dpi(10f)
             card.addView(icon, iconParams)
-            val text = smallText(label, 14f, UiStyle.textPrimary)
+            val text = smallText(label, 16f, UiStyle.textPrimary)
             card.addView(text, weightParams())
             val mark = IconView(this, IconKind.CHECK_SMALL, Color.TRANSPARENT)
             card.addView(mark, LinearLayout.LayoutParams(dpi(22f), dpi(22f)))
@@ -2214,7 +2218,7 @@ class MainActivity : Activity() {
             row.isClickable = true
             row.background = UiStyle.focusable(this, UiStyle.card, 8f)
             row.setPadding(dpi(8f), dpi(8f), dpi(8f), dpi(8f))
-            val text = smallText(label, 14f, UiStyle.textPrimary)
+            val text = smallText(label, 16f, UiStyle.textPrimary)
             val dot = RadioDot(this)
             row.addView(text, weightParams())
             row.addView(dot)
@@ -2246,7 +2250,7 @@ class MainActivity : Activity() {
         options.forEachIndexed { i, option ->
             val box = CheckBox(this)
             box.text = optionText(option, labels.getOrElse(i) { option })
-            box.textSize = 12f
+            box.textSize = 14f
             box.setTextColor(UiStyle.textPrimary)
             box.isChecked = option in setting.values
             box.setOnCheckedChangeListener { _, _ ->
@@ -2305,10 +2309,10 @@ class MainActivity : Activity() {
         )
         private val ambientDot = RadioDot(this@MainActivity)
         private val airplaneDot = RadioDot(this@MainActivity)
-        private val currentCaption = smallText("", 12f, UiStyle.textSecondary)
+        private val currentCaption = smallText("", 14f, UiStyle.textSecondary)
         private val barBox = LinearLayout(this@MainActivity)
         private val airplaneBox = LinearLayout(this@MainActivity)
-        private val airplaneSubtitle = smallText("", 12f, UiStyle.textSecondary)
+        private val airplaneSubtitle = smallText("", 14f, UiStyle.textSecondary)
         private val airplanePills = ArrayList<Pair<String, Button>>()
         private var pressureUpdater: ((Any?) -> Unit)? = null
         val view: LinearLayout = LinearLayout(this@MainActivity)
@@ -2523,7 +2527,7 @@ class MainActivity : Activity() {
  
     // ---------- lifecycle ----------
  
-    private val APP_VERSION = "v17-ממשק רשמי"
+    private val APP_VERSION = "v18-ממשק רשמי"
  
     override fun onCreate(savedInstanceState: Bundle?) {
         // A light theme without the system title bar (the app draws its own top bars).
