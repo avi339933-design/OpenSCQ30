@@ -87,9 +87,9 @@ class MainActivity : Activity() {
     private class ProfileCard(
         val option: String?,
         val root: LinearLayout,
-        val icon: IconView,
+        val icon: OfficialIconView,
         val title: TextView,
-        val mark: IconView,
+        val mark: OfficialIconView,
     )
  
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -119,7 +119,7 @@ class MainActivity : Activity() {
     private var listBody: LinearLayout? = null
     private var listTopBar: LinearLayout? = null
     private var listTab = ListTab.DEVICES
-    private val navIcons = ArrayList<IconView>()
+    private val navIcons = ArrayList<OfficialIconView>()
     private var lastRowsSignature = ""
  
     // Device screen: tabs (sound, equalizer, buttons) and the "more settings" page.
@@ -358,14 +358,14 @@ class MainActivity : Activity() {
     }
  
     // A focusable icon button (the top bar of the device screen).
-    private fun iconButton(kind: IconKind, onClick: () -> Unit): LinearLayout {
+    private fun iconButton(kind: OfficialIcon, onClick: () -> Unit): LinearLayout {
         val holder = LinearLayout(this)
         holder.gravity = Gravity.CENTER
         holder.isFocusable = true
         holder.isClickable = true
         holder.background = UiStyle.focusable(this, UiStyle.card, 8f)
         holder.setPadding(dpi(8f), dpi(8f), dpi(8f), dpi(8f))
-        holder.addView(IconView(this, kind, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(24f), dpi(24f)))
+        holder.addView(OfficialIconView(this, kind, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(24f), dpi(24f)))
         holder.setOnClickListener { onClick() }
         return holder
     }
@@ -463,9 +463,9 @@ class MainActivity : Activity() {
         nav.setBackgroundColor(UiStyle.card)
         navIcons.clear()
         listOf(
-            Pair(IconKind.DEVICES, ListTab.DEVICES),
-            Pair(IconKind.PLANET, ListTab.LOG),
-            Pair(IconKind.PERSON, ListTab.PROFILE),
+            Pair(OfficialIcon.NAV_DEVICE, ListTab.DEVICES),
+            Pair(OfficialIcon.NAV_DISCOVER, ListTab.LOG),
+            Pair(OfficialIcon.NAV_ME, ListTab.PROFILE),
         ).forEach { (kind, tab) ->
             val holder = LinearLayout(this)
             holder.gravity = Gravity.CENTER
@@ -473,7 +473,7 @@ class MainActivity : Activity() {
             holder.isClickable = true
             holder.background = UiStyle.focusable(this, UiStyle.card, 0f)
             holder.setPadding(0, dpi(9f), 0, dpi(9f))
-            val icon = IconView(this, kind, UiStyle.textSecondary)
+            val icon = OfficialIconView(this, kind, UiStyle.textSecondary)
             holder.addView(icon, LinearLayout.LayoutParams(dpi(26f), dpi(26f)))
             holder.setOnClickListener { showListTab(tab) }
             navIcons.add(icon)
@@ -951,7 +951,7 @@ class MainActivity : Activity() {
         title.text = deviceTitle
         titleView = title
  
-        val gear = iconButton(IconKind.GEAR) { setMoreMode(true) }
+        val gear = iconButton(OfficialIcon.SETTING) { setMoreMode(true) }
         gearButton = gear
  
         val topBar = LinearLayout(this)
@@ -960,12 +960,8 @@ class MainActivity : Activity() {
         topBar.gravity = Gravity.CENTER_VERTICAL
         topBar.setBackgroundColor(UiStyle.card)
         topBar.setPadding(dpi(4f), dpi(2f), dpi(4f), dpi(2f))
-        topBar.addView(iconButton(IconKind.BACK) { onBackPressed() }, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
+        topBar.addView(iconButton(OfficialIcon.BACK) { onBackPressed() }, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
         topBar.addView(title, weightParams())
-        val headset = LinearLayout(this)
-        headset.gravity = Gravity.CENTER
-        headset.addView(IconView(this, IconKind.HEADSET, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(24f), dpi(24f)))
-        topBar.addView(headset, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
         topBar.addView(gear, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
  
         val earbuds = EarbudsView(this)
@@ -2038,7 +2034,7 @@ class MainActivity : Activity() {
         val subtitle = smallText("", 14f, UiStyle.textSecondary)
         column.addView(subtitle)
         row.addView(column, weightParams())
-        row.addView(IconView(this, IconKind.CHEVRON, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
+        row.addView(OfficialIconView(this, OfficialIcon.ARROW_RIGHT, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
  
         row.setOnClickListener {
             val checked = entries.indexOfFirst { it.first == currentOption }
@@ -2114,13 +2110,13 @@ class MainActivity : Activity() {
             card.isFocusable = true
             card.isClickable = true
             card.setPadding(dpi(12f), dpi(12f), dpi(12f), dpi(12f))
-            val icon = IconView(this, IconKind.EQUALIZER, UiStyle.blue)
+            val icon = OfficialIconView(this, OfficialIcon.TAB_EQ, UiStyle.blue)
             val iconParams = LinearLayout.LayoutParams(dpi(24f), dpi(24f))
             iconParams.marginEnd = dpi(10f)
             card.addView(icon, iconParams)
             val text = smallText(label, 16f, UiStyle.textPrimary)
             card.addView(text, weightParams())
-            val mark = IconView(this, IconKind.CHECK_SMALL, Color.TRANSPARENT)
+            val mark = OfficialIconView(this, OfficialIcon.CHECK, Color.TRANSPARENT)
             card.addView(mark, LinearLayout.LayoutParams(dpi(22f), dpi(22f)))
             card.setOnClickListener {
                 if (!updatingUi) {
@@ -2527,7 +2523,7 @@ class MainActivity : Activity() {
  
     // ---------- lifecycle ----------
  
-    private val APP_VERSION = "v18-ממשק רשמי"
+    private val APP_VERSION = "v19-ממשק רשמי"
  
     override fun onCreate(savedInstanceState: Bundle?) {
         // A light theme without the system title bar (the app draws its own top bars).
@@ -2629,3 +2625,4 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 }
+ 
