@@ -231,10 +231,10 @@ class EarbudsView(context: Context) : View(context) {
  
     init {
         valuePaint.textAlign = Paint.Align.LEFT
-        valuePaint.color = 0xFF1B1F24.toInt()
+        valuePaint.color = 0xFF333333.toInt()
         valuePaint.typeface = Typeface.DEFAULT_BOLD
         letterPaint.textAlign = Paint.Align.CENTER
-        letterPaint.color = 0xFF6B7480.toInt()
+        letterPaint.color = 0xFF999999.toInt()
         letterPaint.typeface = Typeface.DEFAULT_BOLD
     }
  
@@ -287,15 +287,16 @@ class EarbudsView(context: Context) : View(context) {
             singlePercent?.let { items.add(intArrayOf(KIND_SINGLE, it, 0)) }
         }
  
-        val span = w * 0.84f
-        val slot = span / max(items.size, 3)
-        val startX = (w - slot * items.size) / 2f
+        // The original: battery blocks 54dp wide with 20dp between them, centered.
+        val slot = dp(54f)
+        val gap = dp(20f)
+        val startX = (w - (slot * items.size + gap * max(items.size - 1, 0))) / 2f
  
         val separateParts = items.isNotEmpty() && (leftPart != null || rightPart != null)
         if (separateParts) {
             // Each part above its own battery.
             items.forEachIndexed { index, item ->
-                val cx = startX + slot * (index + 0.5f)
+                val cx = startX + (slot + gap) * index + slot / 2f
                 drawPart(canvas, cx, slot, pictureBottom, item[0])
             }
         } else {
@@ -312,7 +313,7 @@ class EarbudsView(context: Context) : View(context) {
  
         if (items.isEmpty()) return
         items.forEachIndexed { index, item ->
-            val cx = startX + slot * (index + 0.5f)
+            val cx = startX + (slot + gap) * index + slot / 2f
             drawBatteryItem(canvas, cx, slot, h, item[0], item[1], item[2] == 1)
         }
     }
@@ -321,13 +322,14 @@ class EarbudsView(context: Context) : View(context) {
     private fun drawPart(canvas: Canvas, cx: Float, slot: Float, bottom: Float, kind: Int) {
         val top = dp(6f)
         val height = bottom - top
-        val radius = min(slot, height) * 0.48f
+        val width = slot + dp(16f)
+        val radius = min(width, height) * 0.48f
         paint.style = Paint.Style.FILL
         paint.color = 0xFFE6F6FD.toInt()
         canvas.drawCircle(cx, top + height / 2f, radius, paint)
  
-        val inset = slot * 0.08f
-        val dst = RectF(cx - slot / 2f + inset, top + height * 0.08f, cx + slot / 2f - inset, bottom - height * 0.08f)
+        val inset = width * 0.06f
+        val dst = RectF(cx - width / 2f + inset, top + height * 0.08f, cx + width / 2f - inset, bottom - height * 0.08f)
         val left = leftPart
         val right = rightPart
         val case = casePart
@@ -368,7 +370,7 @@ class EarbudsView(context: Context) : View(context) {
         if (kind != KIND_SINGLE) drawBatteryIcon(canvas, kind, x + iconWidth / 2f, centerY)
         canvas.drawText(text, x + iconWidth + gap, baseline, valuePaint)
  
-        val barWidth = slot * 0.72f
+        val barWidth = slot
         val barHeight = dp(3f)
         val barTop = h - dp(10f)
         paint.style = Paint.Style.FILL
@@ -386,7 +388,7 @@ class EarbudsView(context: Context) : View(context) {
     private fun drawBatteryIcon(canvas: Canvas, kind: Int, cx: Float, cy: Float) {
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = dp(1.2f)
-        paint.color = 0xFF6B7480.toInt()
+        paint.color = 0xFF999999.toInt()
         if (kind == KIND_CASE) {
             rect.set(cx - dp(6f), cy - dp(4.5f), cx + dp(6f), cy + dp(4.5f))
             canvas.drawRoundRect(rect, dp(3f), dp(3f), paint)
