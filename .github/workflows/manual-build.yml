@@ -7,6 +7,10 @@ on:
         type: boolean
         default: false
  
+# Needed to publish the APK as a release (see the last step).
+permissions:
+  contents: write
+ 
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -59,4 +63,21 @@ jobs:
         with:
           name: apk-output
           path: android/lite/build/outputs/apk/**/*.apk
+ 
+      # Also publish the APK as a release. The download link of a release goes through github.com, and is often
+      # open in places where the link of an Actions artifact is blocked. The release "latest-apk" is replaced by
+      # every successful build, so it always holds the newest APK.
+      - name: Publish the APK as a release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=$(find android/lite/build/outputs/apk -name '*.apk' | head -n 1)
+          cp "$APK" openscq30-lite.apk
+          gh release delete latest-apk --yes --cleanup-tag || true
+          gh release create latest-apk openscq30-lite.apk \
+            --target "${{ github.sha }}" \
+            --title "Latest APK" \
+            --notes "Built from commit ${{ github.sha }}" \
+            --prerelease
  
