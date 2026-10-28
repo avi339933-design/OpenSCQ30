@@ -12,7 +12,8 @@ import android.view.MotionEvent
 import android.view.View
  
 /**
- * A bar of numbered segments, filled with blue up to the selected one (like the level bar in the original app).
+ * A bar of numbered segments, filled with the brand color up to the selected one (like the level bar in the
+ * original app, which is 56dp high).
  * Keys: left / right change the level (the new level is sent half a second after the last key press).
  * Touch: tap or drag on a segment.
  */
@@ -76,7 +77,7 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
     }
  
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), (44 * density).toInt())
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), (56 * density).toInt())
     }
  
     override fun onDraw(canvas: Canvas) {
@@ -86,17 +87,17 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
         val gap = 3f * density
         val padding = 4f * density
         val segmentWidth = (width - 2 * padding - gap * (count - 1)) / count
-        val top = 6f * density
-        val bottom = height - 6f * density
-        paint.textSize = 13f * density
+        val top = 10f * density
+        val bottom = height - 10f * density
+        val corner = 8f * density
  
         for (i in 0 until count) {
             val left = padding + i * (segmentWidth + gap)
             rect.set(left, top, left + segmentWidth, bottom)
             paint.style = Paint.Style.FILL
             paint.color = if (i <= level) UiStyle.blue else UiStyle.track
-            canvas.drawRoundRect(rect, 5f * density, 5f * density, paint)
-            paint.textSize = 13f * density
+            canvas.drawRoundRect(rect, corner, corner, paint)
+            paint.textSize = 14f * density
             while (paint.measureText(labels[i]) > segmentWidth - 4f * density && paint.textSize > 7f * density) {
                 paint.textSize -= 1f * density
             }
@@ -108,7 +109,7 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 2f * density
             paint.color = UiStyle.blueDark
-            canvas.drawRoundRect(rect, 8f * density, 8f * density, paint)
+            canvas.drawRoundRect(rect, 12f * density, 12f * density, paint)
         }
     }
  
