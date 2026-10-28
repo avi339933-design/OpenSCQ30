@@ -384,21 +384,15 @@ class EarbudsView(context: Context) : View(context) {
         }
     }
  
-    // L / R in a small circle, or a small case.
+    // The icons of the original app: the left earbud, the right earbud or the case.
     private fun drawBatteryIcon(canvas: Canvas, kind: Int, cx: Float, cy: Float) {
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = dp(1.2f)
-        paint.color = 0xFF999999.toInt()
-        if (kind == KIND_CASE) {
-            rect.set(cx - dp(6f), cy - dp(4.5f), cx + dp(6f), cy + dp(4.5f))
-            canvas.drawRoundRect(rect, dp(3f), dp(3f), paint)
-            canvas.drawLine(rect.left, cy - dp(1f), rect.right, cy - dp(1f), paint)
-        } else {
-            canvas.drawCircle(cx, cy, dp(6.2f), paint)
-            letterPaint.textSize = dp(7.5f)
-            canvas.drawText(if (kind == KIND_LEFT) "L" else "R", cx, cy + dp(2.6f), letterPaint)
+        val icon = when (kind) {
+            KIND_CASE -> OfficialIcon.BATTERY_BOX
+            KIND_LEFT -> OfficialIcon.BATTERY_LEFT
+            else -> OfficialIcon.BATTERY_RIGHT
         }
-        paint.style = Paint.Style.FILL
+        val size = dp(14f)
+        OfficialIconPainter.draw(canvas, icon, cx - size / 2f, cy - size / 2f, size, 0xFF999999.toInt())
     }
  
     // A small lightning bolt, shown next to the percent while charging.
