@@ -185,7 +185,7 @@ object UiStyle {
         root.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
  
         // The arrow is drawn (not a text character), so it looks the same on every Android version.
-        root.addView(IconView(context, IconKind.CHEVRON, textSecondary), LinearLayout.LayoutParams(dp(context, 18f), dp(context, 18f)))
+        root.addView(OfficialIconView(context, OfficialIcon.ARROW_RIGHT, textSecondary), LinearLayout.LayoutParams(dp(context, 18f), dp(context, 18f)))
  
         root.setOnClickListener { onClick() }
         return RowViews(root, valueView)
