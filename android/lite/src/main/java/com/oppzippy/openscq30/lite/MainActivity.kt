@@ -26,6 +26,7 @@ import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.FrameLayout
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -69,6 +70,7 @@ class MainActivity : Activity() {
         private const val TAB_EQ = 1
         private const val TAB_CONTROLS = 2
         private const val TAB_MORE = 3
+        private const val TABS_DP = 47f // the height of the tab row under the header
         private const val PRESSURE_TIP = "Atm (אטמוספירה)\nלחץ האוויר האטמוספרי הסטנדרטי הוא 1.00. שינויים בלחץ האוויר עלולים להשפיע על ביצועי ביטול הרעשים. אופטימיזציה ללחץ אטמוספרי תשפר את חוויית ביטול הרעשים שלכם."
     }
  
@@ -147,6 +149,11 @@ class MainActivity : Activity() {
     private var sideLeftPill: Button? = null
     private var sideRightPill: Button? = null
     private var buttonsLockCard: LinearLayout? = null
+    private var headerBox: LinearLayout? = null
+    private var earbudsParams: LinearLayout.LayoutParams? = null
+    private var scrollBox: ScrollView? = null
+    private var scrollParams: FrameLayout.LayoutParams? = null
+    private var scrollSpacer: View? = null
     private val slideTitled = HashSet<LinearLayout>()
     private var resetKey: String? = null
     private var resetDevice: Any? = null
@@ -967,7 +974,6 @@ class MainActivity : Activity() {
         val earbuds = EarbudsView(this)
         earbuds.setBackgroundColor(UiStyle.card)
         earbudsView = earbuds
-        val earbudsHeight = dpi(170f)
  
         val strip = LinearLayout(this)
         strip.orientation = LinearLayout.HORIZONTAL
@@ -988,6 +994,7 @@ class MainActivity : Activity() {
             underline.topMargin = dpi(8f)
             header.addView(View(this), underline)
             header.setOnClickListener { selectTab(index) }
+            header.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) scrollBox?.smoothScrollTo(0, 0) }
             strip.addView(header, weightParams())
             headers.add(header)
         }
@@ -1058,18 +1065,45 @@ class MainActivity : Activity() {
         containers.forEach { content.addView(it, matchWrap()) }
         content.addView(log, matchWrap())
  
-        val scrollView = ScrollView(this)
+        // Like the original app: the header (the pictures and the batteries) collapses gradually while the page is
+        // scrolled down, and the tabs stay in place. The content starts with an empty space as high as the part of
+        // the header that collapses, so it starts right under the full header and moves up together with it.
+        val expandedPx = dpi(EarbudsView.EXPANDED_DP)
+        val collapsedPx = dpi(EarbudsView.COLLAPSED_DP)
+        val scrollView = object : ScrollView(this@MainActivity) {
+            override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
+                super.onScrollChanged(l, t, oldl, oldt)
+                updateHeader(t)
+            }
+        }
+        val spacer = View(this)
+        content.addView(spacer, 0, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, expandedPx - collapsedPx))
         scrollView.addView(content)
+        scrollBox = scrollView
+        scrollSpacer = spacer
+ 
+        val header = LinearLayout(this)
+        header.orientation = LinearLayout.VERTICAL
+        val earbudsLayout = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, expandedPx)
+        earbudsParams = earbudsLayout
+        header.addView(earbuds, earbudsLayout)
+        header.addView(strip, matchWrap())
+        header.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
+        headerBox = header
+ 
+        val stack = FrameLayout(this)
+        val scrollLayout = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        scrollLayout.topMargin = collapsedPx + dpi(TABS_DP)
+        scrollParams = scrollLayout
+        stack.addView(scrollView, scrollLayout)
+        stack.addView(header, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
  
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(UiStyle.background)
         rtl(root)
         root.addView(topBar, matchWrap())
-        root.addView(earbuds, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, earbudsHeight))
-        root.addView(strip, matchWrap())
-        root.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
-        root.addView(scrollView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(stack, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
  
         selectTab(TAB_SOUND)
@@ -1140,8 +1174,30 @@ class MainActivity : Activity() {
     }
  
     // The "more settings" page replaces the picture and the tabs (like the original app's second page).
+    // The header gets lower the further the page is scrolled down, until it is only one small row.
+    private fun updateHeader(scrollY: Int) {
+        val params = earbudsParams ?: return
+        if (moreMode) return
+        val expandedPx = dpi(EarbudsView.EXPANDED_DP)
+        val range = expandedPx - dpi(EarbudsView.COLLAPSED_DP)
+        val height = expandedPx - scrollY.coerceIn(0, range)
+        if (params.height != height) {
+            params.height = height
+            earbudsView?.requestLayout()
+        }
+    }
+ 
     private fun setMoreMode(on: Boolean) {
         moreMode = on
+        // The "more settings" page has no header: it uses the whole space under the title.
+        headerBox?.visibility = if (on) View.GONE else View.VISIBLE
+        scrollSpacer?.visibility = if (on) View.GONE else View.VISIBLE
+        scrollParams?.let {
+            it.topMargin = if (on) 0 else dpi(EarbudsView.COLLAPSED_DP) + dpi(TABS_DP)
+            scrollBox?.layoutParams = it
+        }
+        scrollBox?.scrollTo(0, 0)
+        if (!on) updateHeader(0)
         earbudsView?.visibility = if (on) View.GONE else View.VISIBLE
         tabStrip?.visibility = if (on) View.GONE else View.VISIBLE
         gearButton?.visibility = if (on) View.INVISIBLE else View.VISIBLE
@@ -1917,24 +1973,50 @@ class MainActivity : Activity() {
             }
         }
  
-        val root = LinearLayout(this)
-        root.orientation = LinearLayout.VERTICAL
-        root.addView(controlTitle(settingName(key)), matchWrap())
+        // The original (item_binder_sound_preset_eq_chart): one white card, 16dp corners, with an icon, the
+        // name "אקולייזר" and, while the curve is not one of the presets, a small "מותאם אישית" tag.
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.background = UiStyle.rounded(UiStyle.card, dpi(16f).toFloat())
+        card.setPadding(0, dpi(16f), 0, dpi(12f))
+ 
+        val titleRow = LinearLayout(this)
+        titleRow.orientation = LinearLayout.HORIZONTAL
+        titleRow.gravity = Gravity.CENTER_VERTICAL
+        titleRow.setPadding(dpi(16f), 0, dpi(16f), 0)
+        titleRow.addView(
+            OfficialIconView(this, OfficialIcon.TAB_EQ, UiStyle.textPrimary),
+            LinearLayout.LayoutParams(dpi(24f), dpi(24f)),
+        )
+        val titleText = smallText("אקולייזר", 16f, UiStyle.textPrimary)
+        val titleParams = weightParams()
+        titleParams.marginStart = dpi(8f)
+        titleRow.addView(titleText, titleParams)
+        val customTag = smallText("מותאם אישית", 14f, UiStyle.textPrimary)
+        customTag.background = UiStyle.rounded(UiStyle.divider, dpi(46f).toFloat())
+        customTag.setPadding(dpi(12f), dpi(4f), dpi(12f), dpi(4f))
+        customTag.visibility = View.GONE
+        titleRow.addView(customTag)
+        card.addView(titleRow, matchWrap())
  
         val graph = EqualizerGraphView(this, bandNames, min, max, scale)
         graph.readOnly = setting.readOnly
         graph.setValues(IntArray(bandCount) { setting.value.getOrElse(it) { 0 }.toInt() })
         graph.onCommit = { newValues ->
             sendValue(device, key, Value.I16VecValue(newValues.map { it.toShort() }), settingName(key))
+            customTag.visibility = View.VISIBLE
         }
-        root.addView(graph, matchWrap())
+        val graphParams = matchWrap()
+        graphParams.topMargin = dpi(12f)
+        graphParams.setMargins(dpi(16f), dpi(12f), dpi(16f), 0)
+        card.addView(graph, graphParams)
  
         val updater: (Any?) -> Unit = { s ->
             if (s is Setting.EqualizerSetting) {
                 graph.setValues(IntArray(bandCount) { s.value.getOrElse(it) { 0 }.toInt() })
             }
         }
-        return Pair(root, updater)
+        return Pair(card, updater)
     }
  
     // ---------- choices ----------
@@ -2070,7 +2152,9 @@ class MainActivity : Activity() {
         return states
     }
  
-    // The equalizer profiles as a list of cards (like the "Sounds" list of the original app).
+    // The equalizer profiles, like the original "Sounds" list (item_binder_sound_standard): a white row per
+    // preset with a 24dp icon, the name (16sp), and either a chevron (not selected) or a brand-colored check
+    // mark (selected). Each row is its own rounded card, 24dp corners, min height 56dp.
     private fun profileCardsControl(
         device: Any,
         key: String,
@@ -2083,23 +2167,16 @@ class MainActivity : Activity() {
         val entries = entriesOf(options, labels, true, "מותאם אישית")
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.addView(controlTitle(title), matchWrap())
+        root.addView(UiStyle.listTitle(this, "קולות"), matchWrap())
  
-        val cards = ArrayList<ProfileCard>()
+        val rows = ArrayList<ProfileCard>()
         fun highlight(current: String?) {
-            cards.forEach { c ->
+            rows.forEach { c ->
                 val selected = c.option == current
-                c.root.background = profileBackground(selected)
-                c.icon.setTint(if (selected) Color.WHITE else UiStyle.blue)
-                c.title.setTextColor(if (selected) Color.WHITE else UiStyle.textPrimary)
+                c.icon.setTint(if (selected) UiStyle.blue else UiStyle.textPrimary)
+                c.title.setTextColor(UiStyle.textPrimary)
                 c.title.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
-                val markRadius = dpi(11f).toFloat()
-                c.mark.background = if (selected) {
-                    UiStyle.rounded(0x33FFFFFF, markRadius, Color.WHITE, dpi(2f))
-                } else {
-                    UiStyle.rounded(Color.WHITE, markRadius, UiStyle.track, dpi(2f))
-                }
-                c.mark.setTint(if (selected) Color.WHITE else Color.TRANSPARENT)
+                c.mark.setTint(if (selected) UiStyle.blue else Color.TRANSPARENT)
             }
         }
  
@@ -2109,22 +2186,24 @@ class MainActivity : Activity() {
             card.gravity = Gravity.CENTER_VERTICAL
             card.isFocusable = true
             card.isClickable = true
-            card.setPadding(dpi(12f), dpi(12f), dpi(12f), dpi(12f))
-            val icon = OfficialIconView(this, OfficialIcon.TAB_EQ, UiStyle.blue)
+            card.background = UiStyle.focusable(this, UiStyle.card, 24f)
+            card.minimumHeight = dpi(56f)
+            card.setPadding(dpi(16f), dpi(14f), dpi(16f), dpi(14f))
+            val icon = OfficialIconView(this, OfficialIcon.TAB_EQ, UiStyle.textPrimary)
             val iconParams = LinearLayout.LayoutParams(dpi(24f), dpi(24f))
-            iconParams.marginEnd = dpi(10f)
+            iconParams.marginEnd = dpi(8f)
             card.addView(icon, iconParams)
             val text = smallText(label, 16f, UiStyle.textPrimary)
             card.addView(text, weightParams())
             val mark = OfficialIconView(this, OfficialIcon.CHECK, Color.TRANSPARENT)
-            card.addView(mark, LinearLayout.LayoutParams(dpi(22f), dpi(22f)))
+            card.addView(mark, LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
             card.setOnClickListener {
                 if (!updatingUi) {
                     sendValue(device, key, makeValue(option), "$title = $label")
                     highlight(option)
                 }
             }
-            cards.add(ProfileCard(option, card, icon, text, mark))
+            rows.add(ProfileCard(option, card, icon, text, mark))
             val params = matchWrap()
             params.setMargins(0, dpi(3f), 0, dpi(3f))
             root.addView(card, params)
@@ -2523,7 +2602,7 @@ class MainActivity : Activity() {
  
     // ---------- lifecycle ----------
  
-    private val APP_VERSION = "v19-ממשק רשמי"
+    private val APP_VERSION = "v21-ממשק רשמי"
  
     override fun onCreate(savedInstanceState: Bundle?) {
         // A light theme without the system title bar (the app draws its own top bars).
