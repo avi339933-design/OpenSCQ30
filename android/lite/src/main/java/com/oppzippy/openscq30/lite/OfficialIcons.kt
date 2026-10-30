@@ -109,6 +109,10 @@ enum class OfficialIcon(val viewport: Float, val layers: List<IconLayer>) {
             IconLayer("M4.5,3.115L11.5,3.115A3.5,3.5 0,0 1,15 6.615L15,10.162A3.5,3.5 0,0 1,11.5 13.662L4.5,13.662A3.5,3.5 0,0 1,1 10.162L1,6.615A3.5,3.5 0,0 1,4.5 3.115z", false, 1.0f, false, false),
             IconLayer("M1,8.496C1,8.496 3.628,9.55 7.656,9.55C11.684,9.55 15,8.496 15,8.496", false, 1.0f, false, false),
             IconLayer("M6,10.147H10", false, 1.0f, true, false),
+    )),
+    POWER_OFF(24.0f, listOf(
+            IconLayer("M17,5.5C19.4,7.1 21,9.9 21,13C21,18 17,22 12,22C7,22 3,18 3,13C3,9.9 4.6,7.2 7,5.5", false, 2.0f, true, false),
+            IconLayer("M12,3V12", false, 2.0f, true, false),
     ));
 }
  
