@@ -189,7 +189,7 @@ object UiStyle {
         titleView.textSize = 16f
         titleView.setTextColor(textPrimary)
         val valueView = TextView(context)
-        valueView.textSize = 14f
+        valueView.textSize = 15f
         valueView.setTextColor(textSecondary)
         column.addView(titleView)
         column.addView(valueView)
