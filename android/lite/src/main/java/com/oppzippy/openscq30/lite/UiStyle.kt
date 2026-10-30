@@ -46,7 +46,7 @@ object UiStyle {
  
     // A rounded rectangle in the blue gradient.
     fun gradientRounded(radiusPx: Float, strokeColor: Int = 0, strokePx: Int = 0): GradientDrawable {
-        val drawable = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, gradient)
+        val drawable = GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT, gradient)
         drawable.cornerRadius = radiusPx
         if (strokePx > 0) drawable.setStroke(strokePx, strokeColor)
         return drawable
@@ -86,6 +86,17 @@ object UiStyle {
         view.setTypeface(view.typeface, Typeface.BOLD)
         view.setTextColor(textPrimary)
         view.setPadding(dp(context, 12f), dp(context, 12f), dp(context, 12f), dp(context, 4f))
+        return view
+    }
+ 
+    // The small title above a list of items, like "קולות" above the equalizer presets
+    // (item_binder_sound_title_layout): 14sp, gray, not bold.
+    fun listTitle(context: Context, title: String): TextView {
+        val view = TextView(context)
+        view.text = title
+        view.textSize = 14f
+        view.setTextColor(textSecondary)
+        view.setPadding(dp(context, 12f), dp(context, 16f), dp(context, 12f), dp(context, 4f))
         return view
     }
  
