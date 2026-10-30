@@ -205,6 +205,10 @@ class EarbudsView(context: Context) : View(context) {
         private const val KIND_RIGHT = 1
         private const val KIND_CASE = 2
         private const val KIND_SINGLE = 3
+ 
+        // The height of the header when the page is at the top, and when it is scrolled down (collapsed).
+        const val EXPANDED_DP = 170f
+        const val COLLAPSED_DP = 56f
     }
  
     private val density = resources.displayMetrics.density
@@ -276,6 +280,12 @@ class EarbudsView(context: Context) : View(context) {
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
  
+        // 0 = the page is at the top (the pictures and the batteries centered), 1 = the page is scrolled down and
+        // the header is collapsed into one small row, like in the original app.
+        val expandedH = dp(EXPANDED_DP)
+        val collapsedH = dp(COLLAPSED_DP)
+        val p = ((expandedH - h) / (expandedH - collapsedH)).coerceIn(0f, 1f)
+ 
         val pictureBottom = h - dp(38f)
  
         // The battery items, from left to right.
@@ -287,34 +297,56 @@ class EarbudsView(context: Context) : View(context) {
             singlePercent?.let { items.add(intArrayOf(KIND_SINGLE, it, 0)) }
         }
  
-        // The original: battery blocks 54dp wide with 20dp between them, centered.
+        // The original: battery blocks 54dp wide with 20dp between them, centered. When collapsed they move next to
+        // a small picture of the device, 8dp apart.
         val slot = dp(54f)
         val gap = dp(20f)
         val startX = (w - (slot * items.size + gap * max(items.size - 1, 0))) / 2f
+        val iconSize = dp(32f)
+        val collapsedStart = dp(16f) + iconSize + dp(8f)
+        val collapsedGap = dp(8f)
+        fun centerOf(index: Int): Float {
+            val expanded = startX + (slot + gap) * index + slot / 2f
+            val compact = collapsedStart + (slot + collapsedGap) * index + slot / 2f
+            return expanded + (compact - expanded) * p
+        }
  
-        val separateParts = items.isNotEmpty() && (leftPart != null || rightPart != null)
-        if (separateParts) {
-            // Each part above its own battery.
-            items.forEachIndexed { index, item ->
-                val cx = startX + (slot + gap) * index + slot / 2f
-                drawPart(canvas, cx, slot, pictureBottom, item[0])
+        val headphonesOnly = leftPercent == null && rightPercent == null && casePercent == null &&
+            singlePercent != null
+ 
+        // The pictures fade out while the header collapses.
+        val pictureAlpha = ((1f - p * 1.6f).coerceIn(0f, 1f) * 255f).toInt()
+        if (pictureAlpha > 0) {
+            val layer = canvas.saveLayerAlpha(0f, 0f, w, h, pictureAlpha, Canvas.ALL_SAVE_FLAG)
+            val separateParts = items.isNotEmpty() && (leftPart != null || rightPart != null)
+            if (separateParts) {
+                // Each part above its own battery.
+                items.forEachIndexed { index, item ->
+                    drawPart(canvas, centerOf(index), slot, pictureBottom, item[0])
+                }
+            } else {
+                // One picture of the whole device on a pale shape (on the right, like the original app).
+                paint.style = Paint.Style.FILL
+                paint.color = 0xFFE6F6FD.toInt()
+                canvas.drawCircle(w * 0.74f, pictureBottom * 0.5f + dp(6f), pictureBottom * 0.5f, paint)
+                val dst = RectF(w * 0.14f, dp(6f), w * 0.68f, pictureBottom)
+                drawer.draw(canvas, hero, dst, headphonesOnly)
             }
-        } else {
-            // One picture of the whole device on a pale shape (on the right, like the original app).
-            paint.style = Paint.Style.FILL
-            paint.color = 0xFFE6F6FD.toInt()
-            canvas.drawCircle(w * 0.74f, pictureBottom * 0.5f + dp(6f), pictureBottom * 0.5f, paint)
+            canvas.restoreToCount(layer)
+        }
  
-            val headphonesOnly = leftPercent == null && rightPercent == null && casePercent == null &&
-                singlePercent != null
-            val dst = RectF(w * 0.14f, dp(6f), w * 0.68f, pictureBottom)
+        // The small picture of the device that appears at the start of the collapsed row.
+        val iconAlpha = (((p - 0.4f) / 0.6f).coerceIn(0f, 1f) * 255f).toInt()
+        if (iconAlpha > 0) {
+            val layer = canvas.saveLayerAlpha(0f, 0f, w, h, iconAlpha, Canvas.ALL_SAVE_FLAG)
+            val dst = RectF(dp(16f), (h - iconSize) / 2f, dp(16f) + iconSize, (h + iconSize) / 2f)
             drawer.draw(canvas, hero, dst, headphonesOnly)
+            canvas.restoreToCount(layer)
         }
  
         if (items.isEmpty()) return
         items.forEachIndexed { index, item ->
-            val cx = startX + (slot + gap) * index + slot / 2f
-            drawBatteryItem(canvas, cx, slot, h, item[0], item[1], item[2] == 1)
+            drawBatteryItem(canvas, centerOf(index), slot, h, item[0], item[1], item[2] == 1)
         }
     }
  
