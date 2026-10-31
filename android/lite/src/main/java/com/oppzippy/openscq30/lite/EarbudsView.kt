@@ -9,6 +9,9 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.View
+import android.widget.FrameLayout
+import com.airbnb.lottie.LottieAnimationView
+import com.airbnb.lottie.LottieDrawable
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
@@ -25,6 +28,21 @@ import kotlin.math.min
  */
 object DevicePictures {
     private val cache = HashMap<String, Bitmap?>()
+    private val lottieChecked = HashMap<String, Boolean>()
+ 
+    // Whether the original app ships a "control device" Lottie animation for this model
+    // (assets/lottie/<model>_control_device_l.json / _r.json). Not every model has one.
+    fun hasLottie(context: Context, modelId: String): Boolean {
+        val key = modelId.lowercase(Locale.US)
+        return lottieChecked.getOrPut(key) {
+            try {
+                context.assets.open("lottie/${key}_control_device_l.json").close()
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
+    }
  
     private fun loadAsset(context: Context, name: String): Bitmap? = try {
         context.assets.open("devices/$name").use { BitmapFactory.decodeStream(it) }
@@ -172,23 +190,45 @@ class PictureDrawer(private val density: Float) {
     }
 }
  
-// A small picture of the device, used on the "my devices" cards.
-class DevicePictureView(context: Context) : View(context) {
-    private val drawer = PictureDrawer(resources.displayMetrics.density)
+// A small picture of the device, used on the "my devices" cards. Plays the original app's own animation
+// (assets/lottie/<model>_control_device_l.json) when there is one for this model; otherwise falls back to a
+// static picture or a simple drawing.
+class DevicePictureView(context: Context) : FrameLayout(context) {
+    private val staticView = object : View(context) {
+        val drawer = PictureDrawer(resources.displayMetrics.density)
+        var bitmap: Bitmap? = null
+ 
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (width <= 0 || height <= 0) return
+            drawer.draw(canvas, bitmap, RectF(0f, 0f, width.toFloat(), height.toFloat()))
+        }
+    }
+    private val lottieView = LottieAnimationView(context)
     private var modelId = ""
-    private var bitmap: Bitmap? = null
+ 
+    init {
+        addView(staticView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        lottieView.repeatCount = LottieDrawable.INFINITE
+        lottieView.visibility = View.GONE
+        addView(lottieView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
  
     fun setModel(id: String) {
         if (id == modelId) return
         modelId = id
-        bitmap = if (id.isEmpty()) null else DevicePictures.hero(context, id)
-        invalidate()
-    }
- 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        if (width <= 0 || height <= 0) return
-        drawer.draw(canvas, bitmap, RectF(0f, 0f, width.toFloat(), height.toFloat()))
+        if (id.isNotEmpty() && DevicePictures.hasLottie(context, id)) {
+            staticView.visibility = View.GONE
+            lottieView.visibility = View.VISIBLE
+            lottieView.setAnimation("lottie/${id.lowercase(java.util.Locale.US)}_control_device_l.json")
+            lottieView.playAnimation()
+        } else {
+            lottieView.cancelAnimation()
+            lottieView.visibility = View.GONE
+            staticView.visibility = View.VISIBLE
+            staticView.bitmap = if (id.isEmpty()) null else DevicePictures.hero(context, id)
+            staticView.invalidate()
+        }
     }
 }
  
@@ -410,7 +450,7 @@ class EarbudsView(context: Context) : View(context) {
         rect.set(cx - barWidth / 2f, barTop, cx + barWidth / 2f, barTop + barHeight)
         canvas.drawRoundRect(rect, barHeight / 2f, barHeight / 2f, paint)
         if (level > 0) {
-            paint.color = if (level <= 20) 0xFFE0453A.toInt() else 0xFF2EAE4F.toInt()
+            paint.color = if (level <= 20) 0xFFE0453A.toInt() else 0xFF3DCC3D.toInt() // auxiliary_3, the original's battery-bar color
             rect.set(cx - barWidth / 2f, barTop, cx - barWidth / 2f + barWidth * level / 100f, barTop + barHeight)
             canvas.drawRoundRect(rect, barHeight / 2f, barHeight / 2f, paint)
         }
