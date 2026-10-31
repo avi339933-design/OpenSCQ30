@@ -1,3 +1,4 @@
+
 import com.oppzippy.openscq30.gradle.CopyNativeLibTask
 import com.oppzippy.openscq30.gradle.GenerateUniffiBindingsTask
  
@@ -54,6 +55,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.annotation:annotation:1.9.1")
     implementation("androidx.multidex:multidex:2.0.1") // NEW
+    implementation("com.airbnb.android:lottie:5.2.0") // NEW: plays the original app's Lottie animations
 }
  
 val rustProjectDir: File = layout.projectDirectory.asFile.parentFile
@@ -119,4 +121,5 @@ androidComponents {
         variant.sources.java!!.addStaticSourceDirectory(wrapperDir)
     }
 }
+ 
  
