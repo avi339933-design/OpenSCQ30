@@ -1,18 +1,18 @@
 import com.oppzippy.openscq30.gradle.CopyNativeLibTask
 import com.oppzippy.openscq30.gradle.GenerateUniffiBindingsTask
- 
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.serialization)
     id("kotlin-parcelize")
 }
- 
+
 android {
     namespace = "com.oppzippy.openscq30.lite"
     compileSdk = 37
     buildToolsVersion = "37.0.0"
     ndkVersion = "25.2.9519653"
- 
+
     defaultConfig {
         applicationId = "com.oppzippy.openscq30.lite"
         minSdk = 19
@@ -23,7 +23,7 @@ android {
         versionName = "0.1.$buildNumber"
         multiDexEnabled = true // NEW
     }
- 
+
     // Fixed debug signing key, so every build can be installed over the previous one.
     // The key file is created once by .github/workflows/create-debug-keystore.yml.
     val fixedDebugKeystore = file("debug.keystore")
@@ -37,13 +37,13 @@ android {
             }
         }
     }
- 
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
- 
+
 dependencies {
     implementation(libs.jna) {
         artifact {
@@ -57,15 +57,15 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.4.2") // NEW: LottieAnimationView needs it (minSdk 19 compatible)
     implementation("com.airbnb.android:lottie:5.2.0") // NEW: plays the original app's Lottie animations
 }
- 
+
 val rustProjectDir: File = layout.projectDirectory.asFile.parentFile
 val rustWorkspaceDir: File = rustProjectDir.parentFile
 val cargoTargetDirectory: File = rustWorkspaceDir.resolve("target")
- 
+
 // When no Rust file changed, the GitHub workflow restores the compiled library and the generated Kotlin
 // bindings from a cache and sets SKIP_RUST=true. Then only the Kotlin/Java part is built, which is much faster.
 val skipRust: Boolean = System.getenv("SKIP_RUST") == "true"
- 
+
 val cargoBuildLite = tasks.register<Exec>("cargo-build-lite") {
     description = "Building core for armeabi-v7a"
     workingDir = rustProjectDir
@@ -82,7 +82,7 @@ val cargoBuildLite = tasks.register<Exec>("cargo-build-lite") {
     )
     onlyIf { !skipRust }
 }
- 
+
 val copyNativeLibLite = tasks.register<CopyNativeLibTask>("rust-deploy-lite") {
     dependsOn(cargoBuildLite)
     description = "Copy rust lib to jniLibs"
@@ -92,7 +92,7 @@ val copyNativeLibLite = tasks.register<CopyNativeLibTask>("rust-deploy-lite") {
     this.androidAbi = "armeabi-v7a"
     this.outputDirectory = layout.buildDirectory.get().asFile.resolve("generated/native/debug-armeabi-v7a/jniLibs")
 }
- 
+
 val generateBindingsLite = tasks.register<GenerateUniffiBindingsTask>("generate-uniffi-bindings-lite") {
     dependsOn(cargoBuildLite)
     description = "Generate kotlin bindings using uniffi-bindgen"
@@ -103,11 +103,11 @@ val generateBindingsLite = tasks.register<GenerateUniffiBindingsTask>("generate-
     this.outputDirectory = layout.buildDirectory.get().asFile.resolve("generated/source/uniffi/debug/java")
     onlyIf { !skipRust }
 }
- 
+
 val wrapperDir: String = layout.projectDirectory
     .dir("../app/src/main/java/com/oppzippy/openscq30/lib/wrapper")
     .asFile.absolutePath
- 
+
 androidComponents {
     onVariants(selector().withBuildType("debug")) { variant ->
         variant.sources.jniLibs!!.addGeneratedSourceDirectory(
@@ -121,4 +121,3 @@ androidComponents {
         variant.sources.java!!.addStaticSourceDirectory(wrapperDir)
     }
 }
- 

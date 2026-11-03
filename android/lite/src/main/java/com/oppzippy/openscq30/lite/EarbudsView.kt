@@ -1,5 +1,5 @@
 package com.oppzippy.openscq30.lite
- 
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -15,7 +15,7 @@ import com.airbnb.lottie.LottieDrawable
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
- 
+
 /**
  * Pictures of the devices. The pictures of a model are looked up in assets/devices/, where the file name starts
  * with the model id in lower case (for example "soundcorea3954"):
@@ -29,7 +29,7 @@ import kotlin.math.min
 object DevicePictures {
     private val cache = HashMap<String, Bitmap?>()
     private val lottieChecked = HashMap<String, Boolean>()
- 
+
     // Whether the original app ships a "control device" Lottie animation for this model
     // (assets/lottie/<model>_control_device_l.json / _r.json). Not every model has one.
     fun hasLottie(context: Context, modelId: String): Boolean {
@@ -43,13 +43,13 @@ object DevicePictures {
             }
         }
     }
- 
+
     private fun loadAsset(context: Context, name: String): Bitmap? = try {
         context.assets.open("devices/$name").use { BitmapFactory.decodeStream(it) }
     } catch (_: Throwable) {
         null
     }
- 
+
     fun hero(context: Context, modelId: String): Bitmap? {
         val key = modelId.lowercase(Locale.US)
         if (cache.containsKey(key)) return cache[key]
@@ -58,7 +58,7 @@ object DevicePictures {
         cache[key] = bitmap
         return bitmap
     }
- 
+
     // kind is "left", "right" or "case".
     fun part(context: Context, modelId: String, kind: String): Bitmap? {
         val model = modelId.lowercase(Locale.US)
@@ -69,14 +69,14 @@ object DevicePictures {
         return bitmap
     }
 }
- 
+
 // Draws a device picture (or simple shapes when there is no picture) inside a rectangle.
 class PictureDrawer(private val density: Float) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val rect = RectF()
- 
+
     private fun dp(value: Float): Float = value * density
- 
+
     fun draw(canvas: Canvas, bitmap: Bitmap?, dst: RectF, headphones: Boolean = false) {
         if (bitmap != null) {
             drawFit(canvas, bitmap, dst)
@@ -89,22 +89,22 @@ class PictureDrawer(private val density: Float) {
             drawEarbudShape(canvas, budDst)
         }
     }
- 
+
     // One picture, scaled to fit inside the rectangle.
     fun drawBitmap(canvas: Canvas, bitmap: Bitmap, dst: RectF) {
         drawFit(canvas, bitmap, dst)
     }
- 
+
     // One simple earbud (used when a model has no earbud picture).
     fun drawEarbud(canvas: Canvas, dst: RectF) {
         drawEarbudShape(canvas, dst)
     }
- 
+
     // One simple charging case (used when a model has no case picture).
     fun drawCase(canvas: Canvas, dst: RectF) {
         drawCaseShape(canvas, dst)
     }
- 
+
     private fun drawFit(canvas: Canvas, bitmap: Bitmap, dst: RectF) {
         val scale = min(dst.width() / bitmap.width, dst.height() / bitmap.height)
         val drawWidth = bitmap.width * scale
@@ -119,7 +119,7 @@ class PictureDrawer(private val density: Float) {
         paint.color = 0xFFFFFFFF.toInt()
         canvas.drawBitmap(bitmap, null, rect, paint)
     }
- 
+
     private fun fillAndStroke(canvas: Canvas, draw: (Paint) -> Unit) {
         paint.style = Paint.Style.FILL
         paint.color = 0xFFFFFFFF.toInt()
@@ -130,7 +130,7 @@ class PictureDrawer(private val density: Float) {
         draw(paint)
         paint.style = Paint.Style.FILL
     }
- 
+
     // A simple earbud with a stem, facing right (used when there is no picture for the model).
     private fun drawEarbudShape(canvas: Canvas, dst: RectF) {
         val size = min(dst.width(), dst.height())
@@ -144,7 +144,7 @@ class PictureDrawer(private val density: Float) {
         fillAndStroke(canvas) { canvas.drawRoundRect(rect, stemRadius, stemRadius, it) }
         fillAndStroke(canvas) { canvas.drawCircle(bodyX, bodyY, radius, it) }
     }
- 
+
     // A simple charging case (used when there is no picture for the model).
     private fun drawCaseShape(canvas: Canvas, dst: RectF) {
         val size = min(dst.width(), dst.height())
@@ -167,7 +167,7 @@ class PictureDrawer(private val density: Float) {
         paint.color = 0xFF66BB6A.toInt()
         canvas.drawCircle(dst.centerX(), lidY + caseHeight * 0.2f, dp(2.5f), paint)
     }
- 
+
     // Headphones (no separate earbuds): a headband and two ear cups.
     private fun drawHeadphones(canvas: Canvas, dst: RectF) {
         val cx = dst.centerX()
@@ -189,7 +189,7 @@ class PictureDrawer(private val density: Float) {
         canvas.drawRoundRect(rect, dp(6f), dp(6f), paint)
     }
 }
- 
+
 // A small picture of the device, used on the "my devices" cards. Plays the original app's own animation
 // (assets/lottie/<model>_control_device_l.json) when there is one for this model; otherwise falls back to a
 // static picture or a simple drawing.
@@ -197,7 +197,7 @@ class DevicePictureView(context: Context) : FrameLayout(context) {
     private val staticView = object : View(context) {
         val drawer = PictureDrawer(resources.displayMetrics.density)
         var bitmap: Bitmap? = null
- 
+
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             if (width <= 0 || height <= 0) return
@@ -206,14 +206,14 @@ class DevicePictureView(context: Context) : FrameLayout(context) {
     }
     private val lottieView = LottieAnimationView(context)
     private var modelId = ""
- 
+
     init {
         addView(staticView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         lottieView.repeatCount = LottieDrawable.INFINITE
         lottieView.visibility = View.GONE
         addView(lottieView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
- 
+
     fun setModel(id: String) {
         if (id == modelId) return
         modelId = id
@@ -231,7 +231,7 @@ class DevicePictureView(context: Context) : FrameLayout(context) {
         }
     }
 }
- 
+
 /**
  * The top of the device screen, like the original app: a row of thin battery bars (left earbud, right earbud,
  * case) with a small icon and the percent, and above each battery the picture of that part: the left earbud above
@@ -245,12 +245,12 @@ class EarbudsView(context: Context) : View(context) {
         private const val KIND_RIGHT = 1
         private const val KIND_CASE = 2
         private const val KIND_SINGLE = 3
- 
+
         // The height of the header when the page is at the top, and when it is scrolled down (collapsed).
         const val EXPANDED_DP = 170f
         const val COLLAPSED_DP = 56f
     }
- 
+
     private val density = resources.displayMetrics.density
     private val drawer = PictureDrawer(density)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -258,13 +258,13 @@ class EarbudsView(context: Context) : View(context) {
     private val letterPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
     private val path = Path()
- 
+
     private var modelId = ""
     private var hero: Bitmap? = null
     private var leftPart: Bitmap? = null
     private var rightPart: Bitmap? = null
     private var casePart: Bitmap? = null
- 
+
     private var leftPercent: Int? = null
     private var rightPercent: Int? = null
     private var casePercent: Int? = null
@@ -272,7 +272,7 @@ class EarbudsView(context: Context) : View(context) {
     private var leftCharging = false
     private var rightCharging = false
     private var caseCharging = false
- 
+
     init {
         valuePaint.textAlign = Paint.Align.LEFT
         valuePaint.color = 0xFF333333.toInt()
@@ -281,7 +281,7 @@ class EarbudsView(context: Context) : View(context) {
         letterPaint.color = 0xFF999999.toInt()
         letterPaint.typeface = Typeface.DEFAULT_BOLD
     }
- 
+
     // The model id is the internal name shown in the log after connecting, for example "SoundcoreA3954".
     fun setModel(id: String) {
         if (id == modelId) return
@@ -292,7 +292,7 @@ class EarbudsView(context: Context) : View(context) {
         casePart = if (id.isEmpty()) null else DevicePictures.part(context, id, "case")
         invalidate()
     }
- 
+
     fun setBattery(
         left: Int?,
         right: Int?,
@@ -311,23 +311,23 @@ class EarbudsView(context: Context) : View(context) {
         caseCharging = caseIsCharging
         invalidate()
     }
- 
+
     private fun dp(value: Float): Float = value * density
- 
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
- 
+
         // 0 = the page is at the top (the pictures and the batteries centered), 1 = the page is scrolled down and
         // the header is collapsed into one small row, like in the original app.
         val expandedH = dp(EXPANDED_DP)
         val collapsedH = dp(COLLAPSED_DP)
         val p = ((expandedH - h) / (expandedH - collapsedH)).coerceIn(0f, 1f)
- 
+
         val pictureBottom = h - dp(38f)
- 
+
         // The battery items, from left to right.
         val items = ArrayList<IntArray>() // kind, percent, charging (0/1)
         leftPercent?.let { items.add(intArrayOf(KIND_LEFT, it, if (leftCharging) 1 else 0)) }
@@ -336,7 +336,7 @@ class EarbudsView(context: Context) : View(context) {
         if (items.isEmpty()) {
             singlePercent?.let { items.add(intArrayOf(KIND_SINGLE, it, 0)) }
         }
- 
+
         // The original: battery blocks 54dp wide with 20dp between them, centered. When collapsed they move next to
         // a small picture of the device, 8dp apart.
         val slot = dp(54f)
@@ -350,10 +350,10 @@ class EarbudsView(context: Context) : View(context) {
             val compact = collapsedStart + (slot + collapsedGap) * index + slot / 2f
             return expanded + (compact - expanded) * p
         }
- 
+
         val headphonesOnly = leftPercent == null && rightPercent == null && casePercent == null &&
             singlePercent != null
- 
+
         // The pictures fade out while the header collapses.
         val pictureAlpha = ((1f - p * 1.6f).coerceIn(0f, 1f) * 255f).toInt()
         if (pictureAlpha > 0) {
@@ -374,7 +374,7 @@ class EarbudsView(context: Context) : View(context) {
             }
             canvas.restoreToCount(layer)
         }
- 
+
         // The small picture of the device that appears at the start of the collapsed row.
         val iconAlpha = (((p - 0.4f) / 0.6f).coerceIn(0f, 1f) * 255f).toInt()
         if (iconAlpha > 0) {
@@ -383,13 +383,13 @@ class EarbudsView(context: Context) : View(context) {
             drawer.draw(canvas, hero, dst, headphonesOnly)
             canvas.restoreToCount(layer)
         }
- 
+
         if (items.isEmpty()) return
         items.forEachIndexed { index, item ->
             drawBatteryItem(canvas, centerOf(index), slot, h, item[0], item[1], item[2] == 1)
         }
     }
- 
+
     // The picture of one part (left earbud, right earbud or case) on a small pale circle, above its battery.
     private fun drawPart(canvas: Canvas, cx: Float, slot: Float, bottom: Float, kind: Int) {
         val top = dp(6f)
@@ -399,7 +399,7 @@ class EarbudsView(context: Context) : View(context) {
         paint.style = Paint.Style.FILL
         paint.color = 0xFFE6F6FD.toInt()
         canvas.drawCircle(cx, top + height / 2f, radius, paint)
- 
+
         val inset = width * 0.06f
         val dst = RectF(cx - width / 2f + inset, top + height * 0.08f, cx + width / 2f - inset, bottom - height * 0.08f)
         val left = leftPart
@@ -412,7 +412,7 @@ class EarbudsView(context: Context) : View(context) {
             else -> drawer.draw(canvas, hero, dst, true)
         }
     }
- 
+
     // A small icon, the percent text and a thin bar (red at 20% or less, green above).
     private fun drawBatteryItem(
         canvas: Canvas,
@@ -434,14 +434,14 @@ class EarbudsView(context: Context) : View(context) {
         var x = cx - total / 2f
         val baseline = h - dp(17f)
         val centerY = baseline - dp(4f)
- 
+
         if (charging) {
             drawBolt(canvas, x + dp(3f), centerY)
             x += boltWidth
         }
         if (kind != KIND_SINGLE) drawBatteryIcon(canvas, kind, x + iconWidth / 2f, centerY)
         canvas.drawText(text, x + iconWidth + gap, baseline, valuePaint)
- 
+
         val barWidth = slot
         val barHeight = dp(3f)
         val barTop = h - dp(10f)
@@ -455,7 +455,7 @@ class EarbudsView(context: Context) : View(context) {
             canvas.drawRoundRect(rect, barHeight / 2f, barHeight / 2f, paint)
         }
     }
- 
+
     // The icons of the original app: the left earbud, the right earbud or the case.
     private fun drawBatteryIcon(canvas: Canvas, kind: Int, cx: Float, cy: Float) {
         val icon = when (kind) {
@@ -466,7 +466,7 @@ class EarbudsView(context: Context) : View(context) {
         val size = dp(14f)
         OfficialIconPainter.draw(canvas, icon, cx - size / 2f, cy - size / 2f, size, 0xFF999999.toInt())
     }
- 
+
     // A small lightning bolt, shown next to the percent while charging.
     private fun drawBolt(canvas: Canvas, x: Float, y: Float) {
         path.reset()
@@ -482,4 +482,3 @@ class EarbudsView(context: Context) : View(context) {
         canvas.drawPath(path, paint)
     }
 }
- 

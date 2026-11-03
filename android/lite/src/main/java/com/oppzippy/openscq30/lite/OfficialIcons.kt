@@ -1,5 +1,5 @@
 package com.oppzippy.openscq30.lite
- 
+
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -12,7 +12,7 @@ import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
- 
+
 // One drawing step of an icon: a path filled and/or stroked in the tint color.
 class IconLayer(
     val data: String,
@@ -21,7 +21,7 @@ class IconLayer(
     val round: Boolean,
     val evenOdd: Boolean,
 )
- 
+
 /**
  * Icons taken from the original Soundcore app (its vector drawables), drawn with plain Canvas paths so they work
  * on Android 4.4. The numbers are the size of the original drawing area.
@@ -115,11 +115,11 @@ enum class OfficialIcon(val viewport: Float, val layers: List<IconLayer>) {
             IconLayer("M12,3V12", false, 2.0f, true, false),
     ));
 }
- 
+
 // Turns SVG path data ("M12.8,14.2C14.2,14.2 ...") into an android.graphics.Path.
 object SvgPath {
     private val token = Regex("[MmLlHhVvCcSsQqTtZzAa]|[-+]?(?:\\d*\\.\\d+|\\d+\\.?)(?:[eE][-+]?\\d+)?")
- 
+
     fun parse(data: String): Path {
         val path = Path()
         val t = token.findAll(data).map { it.value }.toList()
@@ -249,7 +249,7 @@ object SvgPath {
         }
         return path
     }
- 
+
     // An SVG arc from (x0, y0) to (x, y), converted to Path.arcTo.
     private fun arcTo(
         path: Path,
@@ -295,12 +295,12 @@ object SvgPath {
         path.arcTo(box, Math.toDegrees(theta1).toFloat(), Math.toDegrees(delta).toFloat())
     }
 }
- 
+
 // Draws the original icons. Used by OfficialIconView and by views that draw by themselves.
 object OfficialIconPainter {
     private val cache = HashMap<OfficialIcon, List<Path>>()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
- 
+
     // Draws the icon in the square that starts at (left, top) and is size x size pixels, in the given color.
     fun draw(canvas: Canvas, icon: OfficialIcon, left: Float, top: Float, size: Float, tint: Int) {
         val paths = cache.getOrPut(icon) { icon.layers.map { SvgPath.parse(it.data) } }
@@ -327,14 +327,14 @@ object OfficialIconPainter {
         canvas.restore()
     }
 }
- 
+
 // Draws one of the original icons in a given color. Works with setTint() like the other icon views.
 class OfficialIconView(context: Context, private val icon: OfficialIcon, private var tint: Int) : View(context) {
     fun setTint(color: Int) {
         tint = color
         invalidate()
     }
- 
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (width <= 0 || height <= 0) return
@@ -342,4 +342,3 @@ class OfficialIconView(context: Context, private val icon: OfficialIcon, private
         OfficialIconPainter.draw(canvas, icon, (width - size) / 2f, (height - size) / 2f, size, tint)
     }
 }
- 

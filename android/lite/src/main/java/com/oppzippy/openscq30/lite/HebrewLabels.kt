@@ -257,4 +257,3 @@ object HebrewLabels {
     // A value shown after a setting name; unknown values stay as they are.
     fun value(text: String): String = values[norm(text)] ?: timeText(text) ?: text
 }
- 

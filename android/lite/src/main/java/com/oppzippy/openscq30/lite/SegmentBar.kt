@@ -1,5 +1,5 @@
 package com.oppzippy.openscq30.lite
- 
+
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -10,7 +10,7 @@ import android.os.Looper
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
- 
+
 /**
  * A bar of numbered segments, filled with the brand color up to the selected one (like the level bar in the
  * original app, which is 56dp high).
@@ -23,18 +23,18 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
     private val rect = RectF()
     private val handler = Handler(Looper.getMainLooper())
     private var pending: Runnable? = null
- 
+
     private var level = 0
- 
+
     // Called with the chosen segment index (0 based) when the user stopped changing the level.
     var onCommit: ((Int) -> Unit)? = null
- 
+
     init {
         isFocusable = true
         layoutDirection = LAYOUT_DIRECTION_LTR
         paint.textAlign = Paint.Align.CENTER
     }
- 
+
     // The value reported by the device. Ignored while the user is in the middle of changing it.
     fun setLevelFromDevice(index: Int) {
         if (pending != null) return
@@ -44,7 +44,7 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
             invalidate()
         }
     }
- 
+
     private fun scheduleCommit() {
         pending?.let { handler.removeCallbacks(it) }
         val runnable = Runnable {
@@ -54,13 +54,13 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
         pending = runnable
         handler.postDelayed(runnable, 500L)
     }
- 
+
     private fun commitNow() {
         pending?.let { handler.removeCallbacks(it) }
         pending = null
         onCommit?.invoke(level)
     }
- 
+
     private fun move(delta: Int) {
         val next = (level + delta).coerceIn(0, labels.size - 1)
         if (next != level) {
@@ -69,17 +69,17 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
             scheduleCommit()
         }
     }
- 
+
     private fun indexAt(x: Float): Int {
         val padding = 4f * density
         val segment = (width - 2 * padding) / labels.size
         return ((x - padding) / segment).toInt().coerceIn(0, labels.size - 1)
     }
- 
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), (56 * density).toInt())
     }
- 
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val count = labels.size
@@ -90,7 +90,7 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
         val top = 10f * density
         val bottom = height - 10f * density
         val corner = 8f * density
- 
+
         for (i in 0 until count) {
             val left = padding + i * (segmentWidth + gap)
             rect.set(left, top, left + segmentWidth, bottom)
@@ -112,7 +112,7 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
             canvas.drawRoundRect(rect, 12f * density, 12f * density, paint)
         }
     }
- 
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT -> {
@@ -126,7 +126,7 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
         }
         return super.onKeyDown(keyCode, event)
     }
- 
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
@@ -148,4 +148,3 @@ class SegmentBar(context: Context, private val labels: List<String>) : View(cont
         return super.onTouchEvent(event)
     }
 }
- 
