@@ -1,5 +1,5 @@
 package com.oppzippy.openscq30.lite
-
+ 
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
@@ -59,7 +59,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-
+ 
 class MainActivity : Activity() {
     companion object {
         private const val REQUEST_ENABLE_BT = 1001
@@ -73,19 +73,19 @@ class MainActivity : Activity() {
         private const val TABS_DP = 47f // the height of the tab row under the header
         private const val PRESSURE_TIP = "Atm (אטמוספירה)\nלחץ האוויר האטמוספרי הסטנדרטי הוא 1.00. שינויים בלחץ האוויר עלולים להשפיע על ביצועי ביטול הרעשים. אופטימיזציה ללחץ אטמוספרי תשפר את חוויית ביטול הרעשים שלכם."
     }
-
+ 
     private enum class Screen { LIST, PICKER, CONNECTED }
-
+ 
     // The three pages of the first screen (the bottom bar): devices, log and the app's own settings.
     private enum class ListTab { DEVICES, LOG, PROFILE }
-
+ 
     // bonded = already paired in Android's Bluetooth. Rows with bonded=false are nearby devices found by scanning.
     private data class Row(val name: String, val mac: String, val model: String?, val bonded: Boolean = true)
-
+ 
     private class SettingItem(val category: String, val key: String, val setting: Any?)
-
+ 
     private class RadioItem(val option: String?, val root: LinearLayout, val dot: RadioDot, val label: TextView)
-
+ 
     private class ProfileCard(
         val option: String?,
         val root: LinearLayout,
@@ -93,11 +93,11 @@ class MainActivity : Activity() {
         val title: TextView,
         val mark: OfficialIconView,
     )
-
+ 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs by lazy { getSharedPreferences("lite", MODE_PRIVATE) }
     private val uiHandler = Handler(Looper.getMainLooper())
-
+ 
     private var session: OpenScq30Session? = null
     private var nativeReady = false
     private var connectionJob: Job? = null
@@ -109,11 +109,11 @@ class MainActivity : Activity() {
     private var resumeMac: String? = null
     private var pendingAfterEnable: (() -> Unit)? = null
     private var pendingPairMac: String? = null
-
+ 
     private var bondedRows: List<Row> = emptyList()
     private val discovered = LinkedHashMap<String, String>() // MAC (upper case) -> name
     private var deviceRows: List<Row> = emptyList()
-
+ 
     // First screen.
     private var statusView: TextView? = null
     private var logView: TextView? = null
@@ -123,7 +123,7 @@ class MainActivity : Activity() {
     private var listTab = ListTab.DEVICES
     private val navIcons = ArrayList<OfficialIconView>()
     private var lastRowsSignature = ""
-
+ 
     // Device screen: tabs (sound, equalizer, buttons) and the "more settings" page.
     private var connectionView: TextView? = null
     private var tabContainers: List<LinearLayout> = emptyList()
@@ -139,10 +139,12 @@ class MainActivity : Activity() {
     private var moreCategory: String? = null
     private var ambientBar: AmbientBar? = null
     private val ambientHandled = HashSet<String>()
+    private var equalizerCard: EqualizerCard? = null
+    private val equalizerHandled = HashSet<String>()
     private val morePages = HashMap<String, LinearLayout>()
     private var moreMenuViews: List<View> = emptyList()
     private var moreMenuCard: LinearLayout? = null
-
+ 
     // The buttons tab: a Left / Right switch and one card for each side.
     private var buttonsLeftCard: LinearLayout? = null
     private var buttonsRightCard: LinearLayout? = null
@@ -158,40 +160,40 @@ class MainActivity : Activity() {
     private val slideTitled = HashSet<LinearLayout>()
     private var resetKey: String? = null
     private var resetDevice: Any? = null
-
+ 
     // One entry per setting id: a function that refreshes its control from a new value.
     private val controls = HashMap<String, (Any?) -> Unit>()
     private val sections = HashMap<String, LinearLayout>()
     private val loggedSkips = HashSet<String>()
     private var updatingUi = false
     private var lastRefreshError = ""
-
+ 
     // Names that have no Hebrew translation yet (N = setting or category name, O = option). Listed in the log.
     private val untranslated = LinkedHashSet<String>()
     private var reportedUntranslated = 0
-
+ 
     private val statusLines = ArrayList<String>()
-
+ 
     private val numberList = Regex("\\[(\\d+(?:, \\d+)*)\\]")
     private val refreshIntervalMs = 3000L
-
+ 
     // Only devices whose Bluetooth MAC address starts with one of these prefixes (the first 3 bytes,
     // which identify the manufacturer) are shown by default. The device name is NOT used for filtering.
     // Prefixes of devices you assign a model to are remembered automatically.
     private val ankerMacPrefixes = listOf(
         "7C:E9:13", // seen on Liberty 4 Pro
     )
-
+ 
     private fun knownPrefixes(): Set<String> {
         val learned: Set<String> = prefs.getStringSet("learned_prefixes", null) ?: emptySet()
         return ankerMacPrefixes.toSet() + learned
     }
-
+ 
     private fun isAnker(mac: String?): Boolean {
         val upper = mac?.uppercase(Locale.US) ?: return false
         return knownPrefixes().any { upper.startsWith(it) }
     }
-
+ 
     private fun learnPrefix(mac: String) {
         val prefix = mac.uppercase(Locale.US).take(8)
         val current: Set<String> = prefs.getStringSet("learned_prefixes", null) ?: emptySet()
@@ -199,18 +201,18 @@ class MainActivity : Activity() {
         updated.add(prefix)
         prefs.edit().putStringSet("learned_prefixes", updated).apply()
     }
-
+ 
     private fun modelName(model: String): String = try {
         translateDeviceModel(model)
     } catch (t: Throwable) {
         model
     }
-
+ 
     // ---------- Hebrew helpers (the translations themselves are in HebrewLabels.kt) ----------
-
+ 
     private fun prettify(key: String): String =
         key.replace(Regex("([a-z])([A-Z])"), "$1 $2").replaceFirstChar { it.uppercase(Locale.US) }
-
+ 
     // Name of a setting or a category, in Hebrew when known.
     private fun settingName(key: String): String {
         val hebrew = HebrewLabels.name(key)
@@ -218,7 +220,7 @@ class MainActivity : Activity() {
         untranslated.add("N:$key")
         return prettify(key)
     }
-
+ 
     // Label of an option (a button), in Hebrew when known.
     private fun optionText(option: String, localized: String): String {
         val hebrew = HebrewLabels.option(option, localized)
@@ -226,20 +228,20 @@ class MainActivity : Activity() {
         untranslated.add("O:$option")
         return localized.ifBlank { option }
     }
-
+ 
     // Lists the names that still have no translation, so they can be added to HebrewLabels.kt.
     private fun reportUntranslated() {
         if (untranslated.size == reportedUntranslated) return
         reportedUntranslated = untranslated.size
         line("חסר תרגום (${untranslated.size}): " + untranslated.joinToString(", "))
     }
-
+ 
     private fun rtl(view: View) {
         view.layoutDirection = View.LAYOUT_DIRECTION_RTL
     }
-
+ 
     private fun dpi(value: Float): Int = UiStyle.dp(this, value)
-
+ 
     private val scanReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -285,15 +287,15 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     // ---------- logging helpers ----------
-
+ 
     private fun line(text: String) {
         statusLines.add(text)
         while (statusLines.size > 200) statusLines.removeAt(0)
         renderStatus()
     }
-
+ 
     private fun renderStatus() {
         when (currentScreen) {
             Screen.CONNECTED -> connectionView?.text = statusLines.takeLast(15).joinToString("\n")
@@ -303,7 +305,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     private fun dumpArrays(message: String): String {
         val out = StringBuilder()
         var index = 0
@@ -320,7 +322,7 @@ class MainActivity : Activity() {
         }
         return out.toString()
     }
-
+ 
     private fun describe(error: Throwable): String {
         val out = StringBuilder()
         var current: Throwable? = error
@@ -343,19 +345,19 @@ class MainActivity : Activity() {
         }
         return out.toString()
     }
-
+ 
     private fun toast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
-
+ 
     private fun makeButton(label: String, onClick: () -> Unit): Button = UiStyle.primaryButton(this, label, onClick)
-
+ 
     private fun matchWrap() =
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-
+ 
     private fun weightParams(weight: Float = 1f) =
         LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight)
-
+ 
     private fun smallText(text: String, size: Float, color: Int, bold: Boolean = false): TextView {
         val view = TextView(this)
         view.text = text
@@ -364,7 +366,7 @@ class MainActivity : Activity() {
         if (bold) view.setTypeface(view.typeface, Typeface.BOLD)
         return view
     }
-
+ 
     // A focusable icon button (the top bar of the device screen).
     private fun iconButton(kind: OfficialIcon, onClick: () -> Unit): LinearLayout {
         val holder = LinearLayout(this)
@@ -377,9 +379,9 @@ class MainActivity : Activity() {
         holder.setOnClickListener { onClick() }
         return holder
     }
-
+ 
     // ---------- Bluetooth enable dialog ----------
-
+ 
     private fun ensureBluetoothEnabled(onReady: () -> Unit) {
         val adapter = BluetoothAdapter.getDefaultAdapter()
         if (adapter == null) {
@@ -399,7 +401,7 @@ class MainActivity : Activity() {
             line("לא הצלחתי לבקש הפעלת Bluetooth: ${t.message}")
         }
     }
-
+ 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_ENABLE_BT) {
@@ -413,21 +415,21 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     // ---------- first screen: "my devices" ----------
-
+ 
     private fun showList() {
         currentScreen = Screen.LIST
         connectionView = null
         cardsContainer = null
         logView = null
         lastRowsSignature = ""
-
+ 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(UiStyle.background)
         rtl(root)
-
+ 
         // Top bar: a bell on one side, the logo in the middle and a headset on the other (like the original app).
         val topBar = LinearLayout(this)
         topBar.orientation = LinearLayout.HORIZONTAL
@@ -442,27 +444,27 @@ class MainActivity : Activity() {
         topBar.addView(IconView(this, IconKind.HEADSET, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(24f), dpi(24f)))
         listTopBar = topBar
         root.addView(topBar, matchWrap())
-
+ 
         val body = LinearLayout(this)
         body.orientation = LinearLayout.VERTICAL
         listBody = body
         val scroll = ScrollView(this)
         scroll.addView(body)
         root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-
+ 
         val status = smallText("", 10f, UiStyle.textSecondary)
         status.setPadding(dpi(12f), dpi(2f), dpi(12f), dpi(4f))
         statusView = status
         root.addView(status, matchWrap())
-
+ 
         root.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
         root.addView(buildBottomNav(), matchWrap())
         setContentView(root)
-
+ 
         showListTab(ListTab.DEVICES)
         refreshDeviceList()
     }
-
+ 
     // The bottom bar: devices, log and the app's own settings.
     private fun buildBottomNav(): LinearLayout {
         val nav = LinearLayout(this)
@@ -489,7 +491,7 @@ class MainActivity : Activity() {
         }
         return nav
     }
-
+ 
     private fun showListTab(tab: ListTab) {
         listTab = tab
         val body = listBody ?: return
@@ -507,17 +509,17 @@ class MainActivity : Activity() {
         }
         renderStatus()
     }
-
+ 
     private fun buildDevicesBody(body: LinearLayout) {
         val heading = smallText("המכשירים שלי", 14f, UiStyle.textSecondary)
         heading.setPadding(dpi(14f), dpi(4f), dpi(14f), dpi(2f))
         body.addView(heading, matchWrap())
-
+ 
         val container = LinearLayout(this)
         container.orientation = LinearLayout.VERTICAL
         cardsContainer = container
         body.addView(container, matchWrap())
-
+ 
         // "Add device" scans for nearby earbuds (they must be in pairing mode).
         val add = LinearLayout(this)
         add.orientation = LinearLayout.HORIZONTAL
@@ -532,10 +534,10 @@ class MainActivity : Activity() {
         add.addView(addText)
         add.setOnClickListener { startScan() }
         body.addView(add, UiStyle.cardParams(this))
-
+ 
         renderCards()
     }
-
+ 
     private fun buildLogBody(body: LinearLayout) {
         val log = TextView(this)
         log.textSize = 10f
@@ -546,7 +548,7 @@ class MainActivity : Activity() {
         logView = log
         body.addView(log, matchWrap())
     }
-
+ 
     // The app's own settings, like the "profile" page of the original app.
     private fun buildProfileBody(body: LinearLayout) {
         val head = LinearLayout(this)
@@ -567,9 +569,9 @@ class MainActivity : Activity() {
         name.setPadding(0, dpi(8f), 0, 0)
         head.addView(name, matchWrap())
         body.addView(head, matchWrap())
-
+ 
         val card = UiStyle.card(this)
-
+ 
         val showAllRow = LinearLayout(this)
         showAllRow.orientation = LinearLayout.HORIZONTAL
         showAllRow.gravity = Gravity.CENTER_VERTICAL
@@ -584,7 +586,7 @@ class MainActivity : Activity() {
         }
         showAllRow.addView(showAllSwitch)
         card.addView(showAllRow, matchWrap())
-
+ 
         fun addRow(title: String, onClick: () -> Unit) {
             card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
             val row = UiStyle.row(this, title, onClick)
@@ -596,7 +598,7 @@ class MainActivity : Activity() {
         addRow("עדכון האפליקציה") {
             UpdateManager.showUpdateDialog(this, { disconnect("עדכון") }, { line(it) })
         }
-
+ 
         card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
         val version = LinearLayout(this)
         version.orientation = LinearLayout.HORIZONTAL
@@ -604,10 +606,10 @@ class MainActivity : Activity() {
         version.addView(smallText("גרסה", 13f, UiStyle.textPrimary), weightParams())
         version.addView(smallText(APP_VERSION, 13f, UiStyle.textSecondary))
         card.addView(version, matchWrap())
-
+ 
         body.addView(card, UiStyle.cardParams(this))
     }
-
+ 
     // Builds one card per device. The cards are rebuilt only when the list really changed, so the keypad focus
     // does not jump while the scan keeps reporting the same devices.
     private fun renderCards() {
@@ -630,11 +632,11 @@ class MainActivity : Activity() {
             card.isClickable = true
             card.background = UiStyle.focusable(this, UiStyle.card, 14f)
             card.setPadding(dpi(12f), dpi(12f), dpi(12f), dpi(12f))
-
+ 
             val picture = DevicePictureView(this)
             picture.setModel(row.model ?: "")
             card.addView(picture, LinearLayout.LayoutParams(dpi(80f), dpi(64f)))
-
+ 
             val title = if (row.model != null) modelName(row.model) else row.name.ifEmpty { "לא ידוע" }
             val status = when {
                 !row.bonded -> "בקרבת מקום – לחץ לזיווג"
@@ -651,7 +653,7 @@ class MainActivity : Activity() {
             val textParams = weightParams()
             textParams.marginStart = dpi(12f)
             card.addView(texts, textParams)
-
+ 
             card.setOnClickListener { onDeviceChosen(row) }
             card.setOnLongClickListener {
                 if (row.bonded) showDeviceMenu(row)
@@ -661,7 +663,7 @@ class MainActivity : Activity() {
         }
         if (currentFocus == null) container.getChildAt(0)?.requestFocus()
     }
-
+ 
     // All paired (bonded) Bluetooth devices, each with its assigned model (or null).
     private suspend fun allRows(): List<Row> {
         val activeSession = session ?: return emptyList()
@@ -674,7 +676,7 @@ class MainActivity : Activity() {
             Row(d.name, d.macAddress, model)
         }
     }
-
+ 
     // Combines the paired devices and the nearby (scanned) devices into the visible list.
     private fun rebuildRows() {
         val bondedMacs = bondedRows.map { it.mac.uppercase(Locale.US) }.toSet()
@@ -685,7 +687,7 @@ class MainActivity : Activity() {
         deviceRows = bonded + nearby
         renderCards()
     }
-
+ 
     private fun refreshDeviceList() {
         if (session == null) return
         scope.launch {
@@ -701,7 +703,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     private fun onDeviceChosen(row: Row) {
         if (!row.bonded) {
             pairNearby(row)
@@ -719,7 +721,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     // The model whose name appears in the device name (the longest one, if it is the only one that long), or null.
     private fun guessModel(deviceName: String): String? {
         val name = deviceName.lowercase(Locale.US).trim()
@@ -736,7 +738,7 @@ class MainActivity : Activity() {
         val sameLength = matches.count { it.second.length == best.second.length }
         return if (sameLength == 1) best.first else null
     }
-
+ 
     // Pairs with a nearby device from inside the app (no need to open Android's Bluetooth settings).
     private fun pairNearby(row: Row) {
         ensureBluetoothEnabled {
@@ -758,7 +760,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     private fun showDeviceMenu(row: Row) {
         val items: Array<CharSequence> = if (row.model != null) {
             arrayOf("שנה דגם", "בטל שיוך דגם")
@@ -789,22 +791,22 @@ class MainActivity : Activity() {
             }
             .show()
     }
-
+ 
     // ---------- model picker screen ----------
-
+ 
     private fun suggestMatches(deviceName: String, modelLabel: String): Boolean {
         val a = deviceName.lowercase(Locale.US).trim()
         val b = modelLabel.lowercase(Locale.US).trim()
         return b.length >= 5 && (a == b || a.contains(b))
     }
-
+ 
     private fun showModelPicker(row: Row) {
         currentScreen = Screen.PICKER
         connectionView = null
         statusView = null
         cardsContainer = null
         logView = null
-
+ 
         val models: List<Pair<String, String>> = try {
             deviceModels()
                 .filter { it != "SoundcoreDevelopment" }
@@ -815,19 +817,19 @@ class MainActivity : Activity() {
             showList()
             return
         }
-
+ 
         val title = TextView(this)
         title.textSize = 14f
         title.setPadding(8, 8, 8, 8)
         title.text = "בחר את הדגם של ${row.name}"
-
+ 
         val search = EditText(this)
         search.hint = "חפש דגם"
         search.setSingleLine(true)
-
+ 
         val list = ListView(this)
         var shown: List<Pair<String, String>> = emptyList()
-
+ 
         fun update() {
             val query = search.text.toString().trim().lowercase(Locale.US)
             val filtered = models.filter { (id, label) ->
@@ -840,7 +842,7 @@ class MainActivity : Activity() {
             val texts = suggested.map { "* ${it.second}" } + others.map { it.second }
             list.adapter = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, texts)
         }
-
+ 
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -851,7 +853,7 @@ class MainActivity : Activity() {
         list.setOnItemClickListener { _, _, position, _ ->
             if (position < shown.size) onModelChosen(row, shown[position].first)
         }
-
+ 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         rtl(root)
@@ -862,7 +864,7 @@ class MainActivity : Activity() {
         setContentView(root)
         update()
     }
-
+ 
     private fun onModelChosen(row: Row, modelId: String) {
         val activeSession = session ?: return
         scope.launch {
@@ -879,13 +881,13 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     // ---------- scan ----------
-
+ 
     private fun startScan() {
         ensureBluetoothEnabled { beginScan() }
     }
-
+ 
     private fun beginScan() {
         val adapter = BluetoothAdapter.getDefaultAdapter()
         if (adapter == null || !adapter.isEnabled) {
@@ -898,9 +900,9 @@ class MainActivity : Activity() {
         if (adapter.isDiscovering) adapter.cancelDiscovery()
         adapter.startDiscovery()
     }
-
+ 
     // ---------- auto-connect on app start ----------
-
+ 
     private fun autoConnect() {
         if (autoConnectDone) return
         autoConnectDone = true
@@ -924,9 +926,9 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     // ---------- connected screen ----------
-
+ 
     // Device screen, modeled on the original Soundcore app: a white top bar (back, name, headset, settings), the
     // picture with the batteries, three icon tabs (sound, equalizer, buttons) and a "more settings" page behind
     // the settings button.
@@ -946,10 +948,12 @@ class MainActivity : Activity() {
         reportedUntranslated = 0
         ambientBar = null
         ambientHandled.clear()
+        equalizerCard = null
+        equalizerHandled.clear()
         currentTab = TAB_SOUND
         moreMode = false
         deviceTitle = bondedRows.firstOrNull { it.mac.equals(mac, ignoreCase = true) }?.name ?: ""
-
+ 
         val title = TextView(this)
         title.textSize = 18f
         title.setTypeface(null, Typeface.BOLD)
@@ -958,7 +962,7 @@ class MainActivity : Activity() {
         title.maxLines = 1
         title.text = deviceTitle
         titleView = title
-
+ 
         // The LDAC badge next to the title (a3954_device_title_layout): shown only while LDAC is the active
         // codec. Hidden until a setting named "ldac" reports true.
         val ldac = ImageView(this)
@@ -968,7 +972,7 @@ class MainActivity : Activity() {
         } catch (_: Throwable) {
         }
         ldacBadge = ldac
-
+ 
         val titleRow = LinearLayout(this)
         titleRow.orientation = LinearLayout.HORIZONTAL
         titleRow.gravity = Gravity.CENTER
@@ -976,10 +980,10 @@ class MainActivity : Activity() {
         val ldacParams = LinearLayout.LayoutParams(dpi(30f), dpi(12f))
         ldacParams.marginStart = dpi(4f)
         titleRow.addView(ldac, ldacParams)
-
+ 
         val gear = iconButton(OfficialIcon.SETTING) { setMoreMode(true) }
         gearButton = gear
-
+ 
         val topBar = LinearLayout(this)
         topBar.orientation = LinearLayout.HORIZONTAL
         topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
@@ -989,11 +993,11 @@ class MainActivity : Activity() {
         topBar.addView(iconButton(OfficialIcon.BACK) { onBackPressed() }, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
         topBar.addView(titleRow, weightParams())
         topBar.addView(gear, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
-
+ 
         val earbuds = EarbudsView(this)
         earbuds.setBackgroundColor(UiStyle.card)
         earbudsView = earbuds
-
+ 
         val strip = LinearLayout(this)
         strip.orientation = LinearLayout.HORIZONTAL
         strip.layoutDirection = View.LAYOUT_DIRECTION_LTR
@@ -1018,7 +1022,7 @@ class MainActivity : Activity() {
             headers.add(header)
         }
         tabHeaders = headers
-
+ 
         val containers = ArrayList<LinearLayout>()
         for (i in 0..TAB_MORE) {
             val container = LinearLayout(this)
@@ -1026,7 +1030,7 @@ class MainActivity : Activity() {
             containers.add(container)
         }
         tabContainers = containers
-
+ 
         // Buttons tab: Left / Right switch, then a card for the chosen side and a card for general button settings.
         val buttonsTab = containers[TAB_CONTROLS]
         val sideRow = LinearLayout(this)
@@ -1061,7 +1065,7 @@ class MainActivity : Activity() {
         buttonsTab.addView(otherCard, UiStyle.cardParams(this))
         buttonsTab.addView(lockCard, UiStyle.cardParams(this))
         showSide(0)
-
+ 
         // More settings: a menu with one row per category, then a "reconnect" button.
         val menuCard = UiStyle.card(this)
         val reconnect = makeButton("התחבר מחדש") { startConnection(currentMac) }
@@ -1071,19 +1075,19 @@ class MainActivity : Activity() {
         moreMenuViews = listOf(menuCard, reconnect)
         morePages.clear()
         moreCategory = null
-
+ 
         val log = TextView(this)
         log.textSize = 11f
         log.setTextColor(UiStyle.textSecondary)
         log.setPadding(16, 16, 16, 16)
         connectionView = log
-
+ 
         val content = LinearLayout(this)
         content.orientation = LinearLayout.VERTICAL
         content.setPadding(0, dpi(4f), 0, dpi(12f))
         containers.forEach { content.addView(it, matchWrap()) }
         content.addView(log, matchWrap())
-
+ 
         // Like the original app: the header (the pictures and the batteries) collapses gradually while the page is
         // scrolled down, and the tabs stay in place. The content starts with an empty space as high as the part of
         // the header that collapses, so it starts right under the full header and moves up together with it.
@@ -1100,7 +1104,7 @@ class MainActivity : Activity() {
         scrollView.addView(content)
         scrollBox = scrollView
         scrollSpacer = spacer
-
+ 
         val header = LinearLayout(this)
         header.orientation = LinearLayout.VERTICAL
         val earbudsLayout = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, expandedPx)
@@ -1109,14 +1113,14 @@ class MainActivity : Activity() {
         header.addView(strip, matchWrap())
         header.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
         headerBox = header
-
+ 
         val stack = FrameLayout(this)
         val scrollLayout = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         scrollLayout.topMargin = collapsedPx + dpi(TABS_DP)
         scrollParams = scrollLayout
         stack.addView(scrollView, scrollLayout)
         stack.addView(header, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-
+ 
         // The power-off button of the original, floating over the top-end corner of the picture (44dp white
         // circle). Not connected to a command yet: the core has no confirmed "power off" setting for this model.
         val power = LinearLayout(this)
@@ -1124,7 +1128,6 @@ class MainActivity : Activity() {
         power.isFocusable = true
         power.isClickable = true
         power.background = UiStyle.focusable(this, UiStyle.card, 22f)
-        power.elevation = dpi(1f).toFloat()
         power.addView(OfficialIconView(this, OfficialIcon.POWER_OFF, UiStyle.textPrimary), LinearLayout.LayoutParams(dpi(20f), dpi(20f)))
         power.setOnClickListener { toast("כיבוי מרחוק לא זמין כרגע") }
         val powerParams = FrameLayout.LayoutParams(dpi(44f), dpi(44f))
@@ -1133,7 +1136,7 @@ class MainActivity : Activity() {
         powerParams.marginEnd = dpi(20f)
         powerParams.rightMargin = dpi(20f)
         stack.addView(power, powerParams)
-
+ 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(UiStyle.background)
@@ -1141,12 +1144,12 @@ class MainActivity : Activity() {
         root.addView(topBar, matchWrap())
         root.addView(stack, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
-
+ 
         selectTab(TAB_SOUND)
         renderStatus()
         tabHeaders.getOrNull(TAB_SOUND)?.requestFocus()
     }
-
+ 
     // The title of the buttons cards, like the original: "שמע" with a reset icon at the end.
     private fun controlsHeader(): LinearLayout {
         val header = LinearLayout(this)
@@ -1165,7 +1168,7 @@ class MainActivity : Activity() {
         header.addView(reset, LinearLayout.LayoutParams(dpi(28f), dpi(28f)))
         return header
     }
-
+ 
     // The reset icon runs the "reset buttons to default" action of the core, after a confirmation.
     private fun confirmReset() {
         val key = resetKey
@@ -1182,14 +1185,14 @@ class MainActivity : Activity() {
             .setNegativeButton("לא", null)
             .show()
     }
-
+ 
     private fun showSide(side: Int) {
         buttonsLeftCard?.visibility = if (side == 0) View.VISIBLE else View.GONE
         buttonsRightCard?.visibility = if (side == 1) View.VISIBLE else View.GONE
         sideLeftPill?.let { UiStyle.setPillSelected(this, it, side == 0) }
         sideRightPill?.let { UiStyle.setPillSelected(this, it, side == 1) }
     }
-
+ 
     private fun styleTabHeader(header: LinearLayout, selected: Boolean) {
         val icon = header.getChildAt(0) as OfficialIconView
         val underline = header.getChildAt(1)
@@ -1200,7 +1203,7 @@ class MainActivity : Activity() {
             underline.setBackgroundColor(0)
         }
     }
-
+ 
     private fun selectTab(index: Int) {
         currentTab = index
         tabHeaders.forEachIndexed { i, header -> styleTabHeader(header, i == index) }
@@ -1208,7 +1211,7 @@ class MainActivity : Activity() {
             container.visibility = if (!moreMode && i == index) View.VISIBLE else View.GONE
         }
     }
-
+ 
     // The "more settings" page replaces the picture and the tabs (like the original app's second page).
     // The header gets lower the further the page is scrolled down, until it is only one small row.
     private fun updateHeader(scrollY: Int) {
@@ -1222,7 +1225,7 @@ class MainActivity : Activity() {
             earbudsView?.requestLayout()
         }
     }
-
+ 
     private fun setMoreMode(on: Boolean) {
         moreMode = on
         // The "more settings" page has no header: it uses the whole space under the title.
@@ -1248,7 +1251,7 @@ class MainActivity : Activity() {
             titleView?.text = deviceTitle
         }
     }
-
+ 
     // The menu of the "more settings" page: one row per category, like the original app's list.
     private fun showMoreMenu() {
         moreCategory = null
@@ -1256,7 +1259,7 @@ class MainActivity : Activity() {
         moreMenuViews.forEach { it.visibility = View.VISIBLE }
         morePages.values.forEach { it.visibility = View.GONE }
     }
-
+ 
     // One category of the "more settings" page, shown alone.
     private fun openMorePage(category: String) {
         moreCategory = category
@@ -1264,7 +1267,7 @@ class MainActivity : Activity() {
         moreMenuViews.forEach { it.visibility = View.GONE }
         morePages.forEach { (name, page) -> page.visibility = if (name == category) View.VISIBLE else View.GONE }
     }
-
+ 
     private fun addMoreMenuRow(category: String) {
         val menu = moreMenuCard ?: return
         if (menu.childCount > 0) menu.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
@@ -1272,7 +1275,7 @@ class MainActivity : Activity() {
         rowViews.value.visibility = View.GONE
         menu.addView(rowViews.root, matchWrap())
     }
-
+ 
     // Which tab a settings category belongs to; everything else goes to the "more settings" page.
     private fun tabFor(category: String): Int {
         val n = category.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
@@ -1283,7 +1286,7 @@ class MainActivity : Activity() {
             else -> TAB_MORE
         }
     }
-
+ 
     // Reads the battery settings and gives them to the picture.
     private fun updateEarbuds(items: List<SettingItem>) {
         var leftPercent: Int? = null
@@ -1314,9 +1317,9 @@ class MainActivity : Activity() {
             leftCharging, rightCharging, caseCharging,
         )
     }
-
+ 
     // ---------- connect / disconnect ----------
-
+ 
     private fun startConnection(mac: String) {
         if (session == null || !nativeReady) {
             line("עדיין לא מוכן")
@@ -1324,7 +1327,7 @@ class MainActivity : Activity() {
         }
         ensureBluetoothEnabled { connectNow(mac) }
     }
-
+ 
     // Tears down the current connection (if any). Returns true if something was active.
     private fun disconnect(reason: String): Boolean {
         val job = connectionJob
@@ -1339,7 +1342,7 @@ class MainActivity : Activity() {
         }
         return wasActive
     }
-
+ 
     // Closes the Rust device handle and the Bluetooth socket off the main thread.
     private fun releaseDevice(device: Any?, mac: String) {
         Thread {
@@ -1359,7 +1362,7 @@ class MainActivity : Activity() {
             }
         }.start()
     }
-
+ 
     private fun connectNow(mac: String) {
         val activeSession = session
         if (activeSession == null || !nativeReady) {
@@ -1378,14 +1381,14 @@ class MainActivity : Activity() {
                     BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery()
                 } catch (_: Throwable) {
                 }
-
+ 
                 val backends = connectionBackends(applicationContext, scope)
                 val connected = connectWithRetry(activeSession, backends, mac)
                 if (connected == null) {
                     line("ויתרתי אחרי $MAX_CONNECT_ATTEMPTS ניסיונות. לחץ על 'התחבר מחדש' כדי לנסות שוב.")
                     return@launch
                 }
-
+ 
                 activeDevice = connected
                 prefs.edit().putString("last_mac", mac).apply()
                 line("מחובר, דגם: ${modelName(connected.model())}")
@@ -1394,7 +1397,7 @@ class MainActivity : Activity() {
                 deviceTitle = modelName(modelId)
                 if (!moreMode) titleView?.text = deviceTitle
                 earbudsView?.setModel(modelId)
-
+ 
                 // Re-read all settings every few seconds (only while the app is on screen).
                 while (isActive) {
                     if (!ActiveSockets.isConnected(mac)) {
@@ -1428,7 +1431,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     // Tries to connect up to MAX_CONNECT_ATTEMPTS times. The return type is inferred from
     // connectWithBackends, so no generated type name needs to be guessed.
     private suspend fun connectWithRetry(
@@ -1446,7 +1449,7 @@ class MainActivity : Activity() {
         }
         result
     }
-
+ 
     private suspend fun tryConnectOnce(
         activeSession: OpenScq30Session,
         backends: com.oppzippy.openscq30.lib.bindings.ManualConnectionBackends,
@@ -1463,13 +1466,13 @@ class MainActivity : Activity() {
         }
         null
     }
-
+ 
     // ---------- generic settings screen ----------
     // Every setting returned by the core gets a control matching its type. Changing a control sends the new
     // value with device.setSettingValues(listOf(SettingIdValuePair(id, value))).
-
+ 
     private fun keyNorm(text: String): String = text.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
-
+ 
     // Sends several settings in one call, in the given order.
     private fun sendValues(device: Any, pairs: List<SettingIdValuePair>, description: String) {
         scope.launch {
@@ -1482,7 +1485,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     private fun sendValue(device: Any, key: String, value: Value, description: String) {
         scope.launch {
             try {
@@ -1494,7 +1497,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     // The card of a settings category. Categories of the tabs get a small gray header (except the sound tab, which
     // has none in the original app); every other category becomes its own page behind a row in the "more settings"
     // menu.
@@ -1521,7 +1524,7 @@ class MainActivity : Activity() {
         sections[category] = card
         return card
     }
-
+ 
     // The card a control goes into. Button settings go to the card of their side (left / right) in the buttons tab.
     private fun cardFor(item: SettingItem): LinearLayout {
         val lockKey = keyNorm(item.key)
@@ -1546,17 +1549,19 @@ class MainActivity : Activity() {
         }
         return sectionCard(item.category)
     }
-
+ 
     private fun syncSettings(device: Any, items: List<SettingItem>) {
         if (tabContainers.isEmpty() || currentScreen != Screen.CONNECTED) return
         updateEarbuds(items)
         updateAmbientBar(device, items)
+        updateEqualizerCard(device, items)
         items.firstOrNull { keyNorm(it.key) == "ldac" }?.let { item ->
             val on = (item.setting as? Setting.ToggleSetting)?.value == true
             ldacBadge?.visibility = if (on) View.VISIBLE else View.GONE
         }
         for (item in items) {
             if (ambientBar != null && keyNorm(item.key) in ambientHandled) continue
+            if (equalizerCard != null && keyNorm(item.key) in equalizerHandled) continue
             val setting = item.setting ?: continue
             // The reset action is the icon in the title of the buttons cards.
             if (setting is Setting.Action && keyNorm(item.key).contains("resetbuttons")) {
@@ -1592,7 +1597,7 @@ class MainActivity : Activity() {
         }
         reportUntranslated()
     }
-
+ 
     private fun entriesOf(
         options: List<String>,
         labels: List<String>,
@@ -1606,7 +1611,7 @@ class MainActivity : Activity() {
         if (allowNone) entries.add(Pair(null, noneLabel))
         return entries
     }
-
+ 
     // A select: in the buttons tab it is a row with an icon (like the original app), elsewhere it depends on the
     // number of options.
     private fun selectControl(
@@ -1624,7 +1629,7 @@ class MainActivity : Activity() {
         } else {
             choiceControl(device, key, options, labels, allowNone, currentOf, makeValue)
         }
-
+ 
     private fun buildControl(device: Any, key: String, setting: Any, tab: Int): Pair<View, (Any?) -> Unit>? {
         val pressRow = tab == TAB_CONTROLS
         return when (setting) {
@@ -1671,7 +1676,7 @@ class MainActivity : Activity() {
             else -> null
         }
     }
-
+ 
     private fun controlTitle(name: String): TextView {
         val view = TextView(this)
         view.text = name
@@ -1680,7 +1685,7 @@ class MainActivity : Activity() {
         view.setPadding(8, 8, 8, 4)
         return view
     }
-
+ 
     // A line with the name on one side and the current value on the other.
     // The air pressure gets its own light-blue box with a gauge, like the original app.
     private fun infoControl(key: String, initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
@@ -1700,14 +1705,14 @@ class MainActivity : Activity() {
         row.addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         return Pair(row, { s -> value.text = textOf(s) })
     }
-
+ 
     private fun pressureControl(initial: String, textOf: (Any?) -> String): Pair<View, (Any?) -> Unit> {
         val box = LinearLayout(this)
         box.orientation = LinearLayout.HORIZONTAL
         box.gravity = Gravity.CENTER_VERTICAL
         box.background = UiStyle.rounded(UiStyle.blueLight, dpi(12f).toFloat())
         box.setPadding(dpi(12f), dpi(16f), dpi(12f), dpi(16f))
-
+ 
         // The original: a round light-blue mark with the barometer icon in the brand color.
         val iconHolder = LinearLayout(this)
         iconHolder.gravity = Gravity.CENTER
@@ -1719,7 +1724,7 @@ class MainActivity : Activity() {
         val iconParams = LinearLayout.LayoutParams(dpi(48f), dpi(48f))
         iconParams.marginEnd = dpi(8f)
         box.addView(iconHolder, iconParams)
-
+ 
         val texts = LinearLayout(this)
         texts.orientation = LinearLayout.VERTICAL
         val valueRow = LinearLayout(this)
@@ -1733,7 +1738,7 @@ class MainActivity : Activity() {
         box.addView(texts, weightParams())
         return Pair(box, { s -> value.text = textOf(s) })
     }
-
+ 
     // A small "i" icon that opens the explanation of a setting (like the tips of the original app).
     private fun tipIcon(title: String, message: String): View {
         val holder = LinearLayout(this)
@@ -1755,7 +1760,7 @@ class MainActivity : Activity() {
         }
         return holder
     }
-
+ 
     // The original explanation of a setting, for the settings that have one.
     private fun tipFor(key: String): String? {
         val k = keyNorm(key)
@@ -1766,7 +1771,7 @@ class MainActivity : Activity() {
             else -> null
         }
     }
-
+ 
     private fun toggleControl(device: Any, key: String, setting: Setting.ToggleSetting): Pair<View, (Any?) -> Unit> {
         val tip = tipFor(key)
         val box = AnkerSwitch(this)
@@ -1803,7 +1808,7 @@ class MainActivity : Activity() {
         row.addView(box, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         return Pair(row, updater)
     }
-
+ 
     // A button that runs a one-time action (for example resetting the earbud buttons), after a confirmation.
     // The core does not say which value an Action expects, so true is sent. If it does not work, the log shows why.
     private fun actionControl(device: Any, key: String): Pair<View, (Any?) -> Unit> {
@@ -1822,7 +1827,7 @@ class MainActivity : Activity() {
         val updater: (Any?) -> Unit = { }
         return Pair(row.root, updater)
     }
-
+ 
     // A button that opens a box for pasting text, and sends the text to the earbuds' core (for example a
     // list of equalizer profiles to import).
     private fun importControl(
@@ -1856,7 +1861,7 @@ class MainActivity : Activity() {
         val updater: (Any?) -> Unit = { }
         return Pair(row.root, updater)
     }
-
+ 
     // A list with a "remove" button next to every item (for example the devices in dual connections).
     // The list is rebuilt only when it changes, so the focus on a keypad phone does not jump every refresh.
     private fun removeListControl(
@@ -1870,14 +1875,14 @@ class MainActivity : Activity() {
         val rows = LinearLayout(this)
         rows.orientation = LinearLayout.VERTICAL
         root.addView(rows, matchWrap())
-
+ 
         val options = setting.setting.options
         val labels = setting.setting.localizedOptions
         fun labelOf(name: String): String {
             val index = options.indexOf(name)
             return if (index >= 0) labels.getOrElse(index) { name } else name
         }
-
+ 
         var shown: List<String>? = null
         fun render(values: List<String>) {
             if (values == shown) return
@@ -1918,7 +1923,7 @@ class MainActivity : Activity() {
         }
         return Pair(root, updater)
     }
-
+ 
     // A range with up to 10 steps becomes a bar of numbered segments (like the original's level bar);
     // a longer range stays a slider. Both work with keys: with a keypad the value is sent shortly after the last key.
     private fun rangeControl(device: Any, key: String, setting: Setting.I32RangeSetting): Pair<View, (Any?) -> Unit> {
@@ -1926,11 +1931,11 @@ class MainActivity : Activity() {
         val start = range.start
         val step = if (range.step <= 0) 1 else range.step
         val count = (range.end - start) / step + 1
-
+ 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.addView(controlTitle(settingName(key)), matchWrap())
-
+ 
         if (count in 2..10) {
             val bar = SegmentBar(this, (0 until count).map { (start + it * step).toString() })
             bar.setLevelFromDevice((setting.value - start) / step)
@@ -1944,7 +1949,7 @@ class MainActivity : Activity() {
             }
             return Pair(root, updater)
         }
-
+ 
         val label = TextView(this)
         label.textSize = 14f
         label.setTextColor(UiStyle.textSecondary)
@@ -1970,11 +1975,11 @@ class MainActivity : Activity() {
                     uiHandler.postDelayed(sendNow, KEY_SEND_DELAY_MS)
                 }
             }
-
+ 
             override fun onStartTrackingTouch(seekBar: SeekBar) {
                 dragging = true
             }
-
+ 
             override fun onStopTrackingTouch(seekBar: SeekBar) {
                 dragging = false
                 pendingSend?.let { uiHandler.removeCallbacks(it) }
@@ -1993,7 +1998,7 @@ class MainActivity : Activity() {
         }
         return Pair(root, updater)
     }
-
+ 
     // The equalizer as a curve with one point per band (see EqualizerGraphView for how to edit it with the keypad).
     private fun equalizerControl(
         device: Any,
@@ -2014,14 +2019,14 @@ class MainActivity : Activity() {
                 "$hz"
             }
         }
-
+ 
         // The original (item_binder_sound_preset_eq_chart): one white card, 16dp corners, with an icon, the
         // name "אקולייזר" and, while the curve is not one of the presets, a small "מותאם אישית" tag.
         val card = LinearLayout(this)
         card.orientation = LinearLayout.VERTICAL
         card.background = UiStyle.rounded(UiStyle.card, dpi(16f).toFloat())
         card.setPadding(0, dpi(16f), 0, dpi(12f))
-
+ 
         val titleRow = LinearLayout(this)
         titleRow.orientation = LinearLayout.HORIZONTAL
         titleRow.gravity = Gravity.CENTER_VERTICAL
@@ -2040,7 +2045,7 @@ class MainActivity : Activity() {
         customTag.visibility = View.GONE
         titleRow.addView(customTag)
         card.addView(titleRow, matchWrap())
-
+ 
         val graph = EqualizerGraphView(this, bandNames, min, max, scale)
         graph.readOnly = setting.readOnly
         graph.setValues(IntArray(bandCount) { setting.value.getOrElse(it) { 0 }.toInt() })
@@ -2052,7 +2057,7 @@ class MainActivity : Activity() {
         graphParams.topMargin = dpi(12f)
         graphParams.setMargins(dpi(16f), dpi(12f), dpi(16f), 0)
         card.addView(graph, graphParams)
-
+ 
         val updater: (Any?) -> Unit = { s ->
             if (s is Setting.EqualizerSetting) {
                 graph.setValues(IntArray(bandCount) { s.value.getOrElse(it) { 0 }.toInt() })
@@ -2060,9 +2065,9 @@ class MainActivity : Activity() {
         }
         return Pair(card, updater)
     }
-
+ 
     // ---------- choices ----------
-
+ 
     // A sheet that slides up from the bottom with a list of options and a round mark at the chosen one.
     private fun showSheet(title: String, labels: List<String>, checked: Int, onPick: (Int) -> Unit) {
         val dialog = Dialog(this, android.R.style.Theme_Holo_Light_Dialog_NoActionBar)
@@ -2076,7 +2081,7 @@ class MainActivity : Activity() {
         sheet.background = background
         sheet.setPadding(dpi(12f), dpi(14f), dpi(12f), dpi(12f))
         sheet.addView(smallText(title, 16f, UiStyle.textPrimary, true), matchWrap())
-
+ 
         val list = LinearLayout(this)
         list.orientation = LinearLayout.VERTICAL
         var focusRow: View? = null
@@ -2102,7 +2107,7 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this)
         scroll.addView(list)
         sheet.addView(scroll, matchWrap())
-
+ 
         dialog.setContentView(sheet)
         val window = dialog.window
         if (window != null) {
@@ -2113,7 +2118,7 @@ class MainActivity : Activity() {
         dialog.show()
         focusRow?.requestFocus()
     }
-
+ 
     private fun pressIcon(key: String): IconKind {
         val k = keyNorm(key)
         return when {
@@ -2124,7 +2129,7 @@ class MainActivity : Activity() {
             else -> IconKind.DOT1
         }
     }
-
+ 
     // A button setting like in the original app: an icon for the kind of press, its name, the current action
     // underneath and an arrow. Opens a sheet with the possible actions.
     private fun pressRowControl(
@@ -2139,7 +2144,7 @@ class MainActivity : Activity() {
         val title = settingName(key).substringAfter(" – ")
         val entries = entriesOf(options, labels, allowNone)
         var currentOption: String? = null
-
+ 
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
@@ -2147,11 +2152,11 @@ class MainActivity : Activity() {
         row.isClickable = true
         row.background = UiStyle.focusable(this, UiStyle.card, 8f)
         row.setPadding(dpi(8f), dpi(10f), dpi(8f), dpi(10f))
-
+ 
         val iconParams = LinearLayout.LayoutParams(dpi(24f), dpi(24f))
         iconParams.marginEnd = dpi(12f)
         row.addView(IconView(this, pressIcon(key), UiStyle.blue), iconParams)
-
+ 
         val column = LinearLayout(this)
         column.orientation = LinearLayout.VERTICAL
         column.addView(smallText(title, 16f, UiStyle.textPrimary))
@@ -2159,7 +2164,7 @@ class MainActivity : Activity() {
         column.addView(subtitle)
         row.addView(column, weightParams())
         row.addView(OfficialIconView(this, OfficialIcon.ARROW_RIGHT, UiStyle.textSecondary), LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
-
+ 
         row.setOnClickListener {
             val checked = entries.indexOfFirst { it.first == currentOption }
             showSheet(title, entries.map { it.second }, checked) { which ->
@@ -2175,7 +2180,7 @@ class MainActivity : Activity() {
         }
         return Pair(row, updater)
     }
-
+ 
     // A background for the cards of the equalizer profiles: the chosen one in the blue gradient.
     private fun profileBackground(selected: Boolean): StateListDrawable {
         val radius = dpi(12f).toFloat()
@@ -2193,7 +2198,7 @@ class MainActivity : Activity() {
         states.addState(intArrayOf(), normal)
         return states
     }
-
+ 
     // The equalizer profiles, like the original "Sounds" list (item_binder_sound_standard): a white row per
     // preset with a 24dp icon, the name (16sp), and either a chevron (not selected) or a brand-colored check
     // mark (selected). Each row is its own rounded card, 24dp corners, min height 56dp.
@@ -2210,7 +2215,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.addView(UiStyle.listTitle(this, "קולות"), matchWrap())
-
+ 
         val rows = ArrayList<ProfileCard>()
         fun highlight(current: String?) {
             rows.forEach { c ->
@@ -2221,7 +2226,7 @@ class MainActivity : Activity() {
                 c.mark.setTint(if (selected) UiStyle.blue else Color.TRANSPARENT)
             }
         }
-
+ 
         entries.forEach { (option, label) ->
             val card = LinearLayout(this)
             card.orientation = LinearLayout.HORIZONTAL
@@ -2251,11 +2256,11 @@ class MainActivity : Activity() {
             root.addView(card, params)
         }
         highlight(null)
-
+ 
         val updater: (Any?) -> Unit = { s -> highlight(currentOf(s)) }
         return Pair(root, updater)
     }
-
+ 
     // Up to 2 options (or a refresh rate): a row of rounded buttons. 3 or 4 options: rows with a round mark. More
     // options: a row with the current choice that opens a sheet. With allowNone, "ללא" selects "no value".
     private fun choiceControl(
@@ -2269,7 +2274,7 @@ class MainActivity : Activity() {
     ): Pair<View, (Any?) -> Unit> {
         val title = settingName(key)
         val entries = entriesOf(options, labels, allowNone)
-
+ 
         if (entries.size > 4) {
             var currentOption: String? = null
             var valueView: TextView? = null
@@ -2289,11 +2294,11 @@ class MainActivity : Activity() {
             }
             return Pair(rowViews.root, updater)
         }
-
+ 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.addView(controlTitle(title), matchWrap())
-
+ 
         if (entries.size <= 2 || keyNorm(key).contains("refreshrate")) {
             val pills = ArrayList<Pair<String?, Button>>()
             fun highlightPills(current: String?) {
@@ -2318,7 +2323,7 @@ class MainActivity : Activity() {
             val updater: (Any?) -> Unit = { s -> highlightPills(currentOf(s)) }
             return Pair(root, updater)
         }
-
+ 
         val items = ArrayList<RadioItem>()
         fun highlight(current: String?) {
             items.forEach {
@@ -2351,7 +2356,7 @@ class MainActivity : Activity() {
         val updater: (Any?) -> Unit = { s -> highlight(currentOf(s)) }
         return Pair(root, updater)
     }
-
+ 
     private fun multiControl(
         device: Any,
         key: String,
@@ -2360,7 +2365,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.addView(controlTitle(settingName(key)), matchWrap())
-
+ 
         val boxes = ArrayList<Pair<String, CheckBox>>()
         val options = setting.setting.options
         val labels = setting.setting.localizedOptions
@@ -2386,9 +2391,9 @@ class MainActivity : Activity() {
         }
         return Pair(root, updater)
     }
-
+ 
     // ---------- ambient sound card ----------
-
+ 
     // The first card of the sound tab, like the original app: two options with a round mark.
     // "Ambient sound" shows one bar of 11 segments: transparency 1-5 on the left (1 is the strongest), a person icon
     // for "normal" in the middle and noise canceling 6-10 on the right (10 is the strongest). Under the bar are
@@ -2418,7 +2423,7 @@ class MainActivity : Activity() {
         private var lastAncLevel = ancCount
         private var lastAmbientOption: String? = null
         private var airplaneSelected = false
-
+ 
         // The empty label in the middle is drawn as a small person icon.
         private val bar = SegmentBar(
             this@MainActivity,
@@ -2433,10 +2438,10 @@ class MainActivity : Activity() {
         private val airplanePills = ArrayList<Pair<String, Button>>()
         private var pressureUpdater: ((Any?) -> Unit)? = null
         val view: LinearLayout = LinearLayout(this@MainActivity)
-
+ 
         init {
             view.orientation = LinearLayout.VERTICAL
-
+ 
             // Ambient sound: the round mark, the bar and the captions under it.
             view.addView(
                 radioRow(ambientDot, "צליל סביבה", null) {
@@ -2469,9 +2474,9 @@ class MainActivity : Activity() {
             barBox.addView(captions, matchWrap())
             view.addView(barBox, matchWrap())
             bar.onCommit = { index -> send(index) }
-
+ 
             view.addView(UiStyle.divider(this@MainActivity), UiStyle.dividerParams(this@MainActivity))
-
+ 
             // Airplane mode: the round mark with the current pressure, and the update choice when chosen.
             view.addView(
                 radioRow(airplaneDot, "מצב טיסה", airplaneSubtitle) {
@@ -2509,7 +2514,7 @@ class MainActivity : Activity() {
             airplaneBox.visibility = View.GONE
             view.addView(airplaneBox, matchWrap())
         }
-
+ 
         // A row with a round mark, a title and (optionally) a line of gray text under the title.
         private fun radioRow(dot: RadioDot, title: String, subtitle: TextView?, onClick: () -> Unit): LinearLayout {
             val row = LinearLayout(this@MainActivity)
@@ -2530,15 +2535,15 @@ class MainActivity : Activity() {
             row.setOnClickListener { onClick() }
             return row
         }
-
+ 
         private fun optionFor(fragment: String): String? =
             modeOptions.firstOrNull { it.lowercase(Locale.US).contains(fragment) }
-
+ 
         private fun setMode(option: String?) {
             if (option == null) return
             sendValue(device, modeKey, Value.StringValue(option), "צליל סביבה")
         }
-
+ 
         private fun send(index: Int) {
             val pairs = ArrayList<SettingIdValuePair>()
             val description: String
@@ -2563,7 +2568,7 @@ class MainActivity : Activity() {
             }
             sendValues(device, pairs, description)
         }
-
+ 
         // Moves everything to the state reported by the device.
         fun update(
             mode: Setting.SelectSetting?,
@@ -2609,7 +2614,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     private fun updateAmbientBar(device: Any, items: List<SettingItem>) {
         fun find(vararg names: String): SettingItem? = items.firstOrNull { keyNorm(it.key) in names }
         val modeItem = find("ambientsoundmode")
@@ -2641,27 +2646,158 @@ class MainActivity : Activity() {
         }
         ambientBar?.update(mode, anc, trans, airplane, pressure)
     }
-
+ 
+    // ---------- combined equalizer card ----------
+ 
+    // The original (item_binder_sound_preset_eq_chart): ONE white card holds the icon+"אקולייזר" title (with
+    // a "מותאם אישית" tag once the curve is edited by hand), the graph, and then, inside that same card, the
+    // "קולות" list of presets (item_binder_sound_standard) - not two separate cards like a plain list would give.
+    private inner class EqualizerCard(
+        private val device: Any,
+        private val graphKey: String,
+        private val presetKey: String,
+        eq: Setting.EqualizerSetting,
+        preset: Setting.PresetEqualizerProfileSelect,
+    ) {
+        private val bandCount = eq.setting.bandHz.size
+        private val min = eq.setting.min.toInt()
+        private val max = eq.setting.max.toInt()
+        private val scale = Math.pow(10.0, eq.setting.fractionDigits.toDouble())
+        private val bandNames = (0 until bandCount).map { i ->
+            val hz = eq.setting.bandHz[i].toString().toIntOrNull() ?: 0
+            if (hz >= 1000) {
+                val k = hz / 1000.0
+                if (k == k.toInt().toDouble()) "${k.toInt()}k" else String.format(Locale.US, "%.1fk", k)
+            } else {
+                "$hz"
+            }
+        }
+        private val customTag = smallText("מותאם אישית", 14f, UiStyle.textPrimary)
+        private val graph = EqualizerGraphView(this@MainActivity, bandNames, min, max, scale)
+        private val rows = ArrayList<ProfileCard>()
+        private val entries = entriesOf(preset.select.options, preset.select.localizedOptions, true, "מותאם אישית")
+        val view: LinearLayout = LinearLayout(this@MainActivity)
+ 
+        init {
+            view.orientation = LinearLayout.VERTICAL
+            view.background = UiStyle.rounded(UiStyle.card, dpi(16f).toFloat())
+            view.setPadding(0, dpi(16f), 0, dpi(12f))
+ 
+            val titleRow = LinearLayout(this@MainActivity)
+            titleRow.orientation = LinearLayout.HORIZONTAL
+            titleRow.gravity = Gravity.CENTER_VERTICAL
+            titleRow.setPadding(dpi(16f), 0, dpi(16f), 0)
+            titleRow.addView(
+                OfficialIconView(this@MainActivity, OfficialIcon.TAB_EQ, UiStyle.textPrimary),
+                LinearLayout.LayoutParams(dpi(24f), dpi(24f)),
+            )
+            val titleText = smallText("אקולייזר", 16f, UiStyle.textPrimary)
+            val titleParams = weightParams()
+            titleParams.marginStart = dpi(8f)
+            titleRow.addView(titleText, titleParams)
+            customTag.background = UiStyle.rounded(UiStyle.divider, dpi(46f).toFloat())
+            customTag.setPadding(dpi(12f), dpi(4f), dpi(12f), dpi(4f))
+            customTag.visibility = View.GONE
+            titleRow.addView(customTag)
+            view.addView(titleRow, matchWrap())
+ 
+            graph.readOnly = eq.readOnly
+            graph.setValues(IntArray(bandCount) { eq.value.getOrElse(it) { 0 }.toInt() })
+            graph.onCommit = { newValues ->
+                sendValue(device, graphKey, Value.I16VecValue(newValues.map { it.toShort() }), settingName(graphKey))
+                customTag.visibility = View.VISIBLE
+            }
+            val graphParams = matchWrap()
+            graphParams.setMargins(dpi(16f), dpi(12f), dpi(16f), 0)
+            view.addView(graph, graphParams)
+ 
+            view.addView(UiStyle.listTitle(this@MainActivity, "קולות"), matchWrap())
+            entries.forEach { (option, label) ->
+                val card = LinearLayout(this@MainActivity)
+                card.orientation = LinearLayout.HORIZONTAL
+                card.gravity = Gravity.CENTER_VERTICAL
+                card.isFocusable = true
+                card.isClickable = true
+                card.background = UiStyle.focusable(this@MainActivity, UiStyle.card, 24f)
+                card.minimumHeight = dpi(56f)
+                card.setPadding(dpi(16f), dpi(14f), dpi(16f), dpi(14f))
+                val icon = OfficialIconView(this@MainActivity, OfficialIcon.TAB_EQ, UiStyle.textPrimary)
+                val iconParams = LinearLayout.LayoutParams(dpi(24f), dpi(24f))
+                iconParams.marginEnd = dpi(8f)
+                card.addView(icon, iconParams)
+                val text = smallText(label, 16f, UiStyle.textPrimary)
+                card.addView(text, weightParams())
+                val mark = OfficialIconView(this@MainActivity, OfficialIcon.CHECK, Color.TRANSPARENT)
+                card.addView(mark, LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
+                card.setOnClickListener {
+                    if (!updatingUi) {
+                        sendValue(device, presetKey, Value.OptionalStringValue(option), "אקולייזר = $label")
+                        highlight(option)
+                    }
+                }
+                rows.add(ProfileCard(option, card, icon, text, mark))
+                val params = matchWrap()
+                params.setMargins(dpi(16f), dpi(3f), dpi(16f), dpi(3f))
+                view.addView(card, params)
+            }
+            highlight(preset.value)
+        }
+ 
+        private fun highlight(current: String?) {
+            rows.forEach { c ->
+                val selected = c.option == current
+                c.icon.setTint(if (selected) UiStyle.blue else UiStyle.textPrimary)
+                c.title.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+                c.mark.setTint(if (selected) UiStyle.blue else Color.TRANSPARENT)
+            }
+        }
+ 
+        fun update(eq: Setting.EqualizerSetting?, preset: Setting.PresetEqualizerProfileSelect?) {
+            if (eq != null) graph.setValues(IntArray(bandCount) { eq.value.getOrElse(it) { 0 }.toInt() })
+            if (preset != null) highlight(preset.value)
+        }
+    }
+ 
+    // Folds the equalizer curve and the preset list into one card, like the original, whenever the device
+    // exposes both; a device with only one of the two keeps using the separate controls as before.
+    private fun updateEqualizerCard(device: Any, items: List<SettingItem>) {
+        val eqItem = items.firstOrNull { it.setting is Setting.EqualizerSetting }
+        val presetItem = items.firstOrNull { it.setting is Setting.PresetEqualizerProfileSelect }
+        val eq = eqItem?.setting as? Setting.EqualizerSetting
+        val preset = presetItem?.setting as? Setting.PresetEqualizerProfileSelect
+        if (equalizerCard == null) {
+            if (eqItem == null || presetItem == null || eq == null || preset == null) return
+            val created = EqualizerCard(device, eqItem.key, presetItem.key, eq, preset)
+            equalizerCard = created
+            equalizerHandled.add(keyNorm(eqItem.key))
+            equalizerHandled.add(keyNorm(presetItem.key))
+            val card = sectionCard(eqItem.category)
+            if (card.childCount > 0) card.addView(UiStyle.divider(this), UiStyle.dividerParams(this))
+            card.addView(created.view, matchWrap())
+        }
+        equalizerCard?.update(eq, preset)
+    }
+ 
     // ---------- lifecycle ----------
-
-    private val APP_VERSION = "v25-ממשק רשמי"
-
+ 
+    private val APP_VERSION = "v26-ממשק רשמי"
+ 
     override fun onCreate(savedInstanceState: Bundle?) {
         // A light theme without the system title bar (the app draws its own top bars).
         setTheme(android.R.style.Theme_Holo_Light_NoActionBar)
         super.onCreate(savedInstanceState)
         showAll = prefs.getBoolean("show_all", false)
-
+ 
         val filter = IntentFilter()
         filter.addAction(BluetoothDevice.ACTION_FOUND)
         filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
         filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         registerReceiver(scanReceiver, filter)
-
+ 
         showList()
         line("גרסה: $APP_VERSION")
         line("גרסת אנדרואיד (SDK): ${Build.VERSION.SDK_INT}")
-
+ 
         try {
             System.loadLibrary("openscq30_android")
             System.loadLibrary("jnidispatch")
@@ -2673,7 +2809,7 @@ class MainActivity : Activity() {
             line("טעינת הליבה נכשלה:\n" + describe(t))
             return
         }
-
+ 
         scope.launch {
             try {
                 session = newSession(File(filesDir, "openscq30.db").absolutePath)
@@ -2686,7 +2822,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     // When the app leaves the screen: close the connection (no polling in the background, and the
     // earbuds become free for other devices). When it comes back: reconnect automatically.
     override fun onStop() {
@@ -2700,7 +2836,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     override fun onStart() {
         super.onStart()
         val mac = resumeMac
@@ -2709,7 +2845,7 @@ class MainActivity : Activity() {
             startConnection(mac)
         }
     }
-
+ 
     override fun onBackPressed() {
         when (currentScreen) {
             Screen.CONNECTED -> {
@@ -2730,7 +2866,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
+ 
     override fun onDestroy() {
         try {
             unregisterReceiver(scanReceiver)
@@ -2746,3 +2882,4 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 }
+ 
