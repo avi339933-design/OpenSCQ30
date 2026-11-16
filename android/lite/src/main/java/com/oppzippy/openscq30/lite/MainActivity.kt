@@ -71,6 +71,7 @@ class MainActivity : Activity() {
         private const val TAB_CONTROLS = 2
         private const val TAB_MORE = 3
         private const val TABS_DP = 47f // the height of the tab row under the header
+        private const val MAX_AUTO_RECONNECTS = 3
         private const val PRESSURE_TIP = "Atm (אטמוספירה)\nלחץ האוויר האטמוספרי הסטנדרטי הוא 1.00. שינויים בלחץ האוויר עלולים להשפיע על ביצועי ביטול הרעשים. אופטימיזציה ללחץ אטמוספרי תשפר את חוויית ביטול הרעשים שלכם."
     }
 
@@ -107,6 +108,7 @@ class MainActivity : Activity() {
     private var showAll = false
     private var autoConnectDone = false
     private var resumeMac: String? = null
+    private var reconnectTries = 0
     private var pendingAfterEnable: (() -> Unit)? = null
     private var pendingPairMac: String? = null
 
@@ -546,7 +548,45 @@ class MainActivity : Activity() {
         log.layoutDirection = View.LAYOUT_DIRECTION_LTR
         log.setPadding(dpi(10f), dpi(10f), dpi(10f), dpi(10f))
         logView = log
+
+        val buttons = LinearLayout(this)
+        buttons.orientation = LinearLayout.HORIZONTAL
+        val copyParams = weightParams()
+        copyParams.setMargins(dpi(8f), dpi(6f), dpi(4f), dpi(6f))
+        val saveParams = weightParams()
+        saveParams.setMargins(dpi(4f), dpi(6f), dpi(8f), dpi(6f))
+        buttons.addView(makeButton("העתק") { copyLog() }, copyParams)
+        buttons.addView(makeButton("שמור לקובץ") { saveLog() }, saveParams)
+        body.addView(buttons, matchWrap())
         body.addView(log, matchWrap())
+    }
+
+    private fun logText(): String =
+        "OpenSCQ30 Lite $APP_VERSION, Android SDK ${Build.VERSION.SDK_INT}\n" + statusLines.joinToString("\n")
+
+    // Puts the whole log on the clipboard (to paste it into a message).
+    private fun copyLog() {
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("OpenSCQ30 log", logText()))
+            toast("היומן הועתק")
+        } catch (t: Throwable) {
+            toast("ההעתקה נכשלה")
+        }
+    }
+
+    // Saves the log as Download/openscq30_log.txt, so it can be taken from the phone and sent.
+    private fun saveLog() {
+        try {
+            val dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            dir.mkdirs()
+            val file = File(dir, "openscq30_log.txt")
+            file.writeText(logText())
+            toast("נשמר: Download/openscq30_log.txt")
+        } catch (t: Throwable) {
+            toast("השמירה נכשלה")
+            line("שמירת היומן נכשלה:\n" + describe(t))
+        }
     }
 
     // The app's own settings, like the "profile" page of the original app.
@@ -1363,6 +1403,27 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    // After the connection is lost (the earbuds were put in the case, or went out of range) the app tries to connect
+    // again by itself a few times, 4 seconds apart, as long as the device screen is still open. It stops when the
+    // user goes back, leaves the app, or presses "התחבר מחדש" himself.
+    private fun scheduleAutoReconnect(mac: String) {
+        if (reconnectTries >= MAX_AUTO_RECONNECTS) {
+            line("החיבור אבד. לחץ על 'התחבר מחדש' ב'הגדרות נוספות'.")
+            return
+        }
+        reconnectTries += 1
+        val attempt = reconnectTries
+        line("מתחבר מחדש אוטומטית בעוד 4 שניות (ניסיון $attempt מתוך $MAX_AUTO_RECONNECTS)...")
+        uiHandler.postDelayed({
+            val job = connectionJob
+            if (currentScreen == Screen.CONNECTED && currentMac == mac && activeDevice == null &&
+                (job == null || !job.isActive)
+            ) {
+                startConnection(mac)
+            }
+        }, 4000L)
+    }
+
     private fun connectNow(mac: String) {
         val activeSession = session
         if (activeSession == null || !nativeReady) {
@@ -1392,6 +1453,7 @@ class MainActivity : Activity() {
                 activeDevice = connected
                 prefs.edit().putString("last_mac", mac).apply()
                 line("מחובר, דגם: ${modelName(connected.model())}")
+                reconnectTries = 0
                 val modelId = connected.model().toString()
                 line("מזהה דגם (לשם קובצי התמונות): $modelId")
                 deviceTitle = modelName(modelId)
@@ -1404,6 +1466,7 @@ class MainActivity : Activity() {
                         line("החיבור אבד – התנתק מ-$mac")
                         if (activeDevice === connected) activeDevice = null
                         releaseDevice(connected, mac)
+                        scheduleAutoReconnect(mac)
                         break
                     }
                     try {
@@ -2780,7 +2843,7 @@ class MainActivity : Activity() {
 
     // ---------- lifecycle ----------
 
-    private val APP_VERSION = "v26-ממשק רשמי"
+    private val APP_VERSION = "v27-ממשק רשמי"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // A light theme without the system title bar (the app draws its own top bars).
